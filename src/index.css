@@ -1,0 +1,193 @@
+@import "tailwindcss";
+
+/* Tailwind v4 usa prefers-color-scheme por padrão; aqui o modo escuro segue a classe .dark (toggle do app) */
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --animate-fade-in: fade-in 0.18s ease-out;
+  --animate-pop-in: pop-in 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes pop-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@layer base {
+  :root {
+    --bg-primary: #F6F8F7;
+    --surface: #FFFFFF;
+    --primary-green: #426B5B;
+    --primary-green-hover: #345648;
+    --secondary-green: #E9F1EC;
+    --text-primary: #17231D;
+    --text-secondary: #64748B;
+    --border-color: #E5EAE7;
+    --accent-gold: #D97706;
+    color-scheme: light;
+  }
+
+  .dark {
+    --bg-primary: #0C130F;
+    --surface: #141F19;
+    --primary-green: #5A8E7A;
+    --primary-green-hover: #6BA38E;
+    --secondary-green: #1F332A;
+    --text-primary: #EEF3F0;
+    --text-secondary: #9AA8B6;
+    --border-color: #263730;
+    --accent-gold: #F59E0B;
+    color-scheme: dark;
+  }
+
+  /* Tailwind v4 usa currentColor como cor padrão de borda; bordas sem cor explícita ficavam pretas/brancas */
+  *, ::before, ::after {
+    border-color: var(--border-color);
+  }
+
+  html, body {
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+  }
+
+  body {
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    transition: background-color 0.2s ease, color 0.2s ease;
+  }
+
+  input, select, textarea {
+    color: var(--text-primary);
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+
+  input:focus-visible, select:focus-visible, textarea:focus-visible {
+    outline: none;
+    border-color: var(--primary-green) !important;
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary-green) 22%, transparent);
+  }
+
+  button:focus-visible, a:focus-visible, [role='button']:focus-visible {
+    outline: 2px solid var(--primary-green);
+    outline-offset: 2px;
+  }
+
+  button:not(:disabled) {
+    cursor: pointer;
+  }
+
+  option {
+    background-color: var(--surface);
+    color: var(--text-primary);
+  }
+}
+
+/*
+ * Modo escuro para classes de cor "apenas claras" espalhadas pelas telas.
+ * Só se aplica quando o elemento NÃO declara sua própria variante dark:,
+ * e nunca dentro das prévias de impressão (.print-area), que são sempre claras.
+ */
+.dark .bg-white:not([class*='dark:bg-']):not(.print-area, .print-area *) { background-color: var(--surface); }
+.dark .bg-slate-50:not([class*='dark:bg-']):not(.print-area *),
+.dark .bg-gray-50:not([class*='dark:bg-']):not(.print-area *) { background-color: #111A15; }
+.dark .bg-slate-100:not([class*='dark:bg-']):not(.print-area *) { background-color: #1E2B25; }
+.dark .bg-slate-200:not([class*='dark:bg-']):not(.print-area *) { background-color: #263730; }
+.dark .bg-emerald-50:not([class*='dark:bg-']):not(.print-area *),
+.dark .bg-emerald-100:not([class*='dark:bg-']):not(.print-area *) { background-color: rgb(6 78 59 / 0.45); }
+.dark .bg-amber-50:not([class*='dark:bg-']):not(.print-area *),
+.dark .bg-amber-100:not([class*='dark:bg-']):not(.print-area *) { background-color: rgb(120 53 15 / 0.45); }
+.dark .bg-rose-50:not([class*='dark:bg-']):not(.print-area *),
+.dark .bg-rose-100:not([class*='dark:bg-']):not(.print-area *) { background-color: rgb(136 19 55 / 0.4); }
+.dark .bg-blue-50:not([class*='dark:bg-']):not(.print-area *),
+.dark .bg-blue-100:not([class*='dark:bg-']):not(.print-area *) { background-color: rgb(30 58 138 / 0.45); }
+.dark .bg-orange-100:not([class*='dark:bg-']):not(.print-area *) { background-color: rgb(124 45 18 / 0.45); }
+.dark .bg-purple-100:not([class*='dark:bg-']):not(.print-area *) { background-color: rgb(88 28 135 / 0.45); }
+
+.dark :is(.text-slate-600, .text-slate-700, .text-slate-800, .text-slate-900):not([class*='dark:text-']):not(.print-area *) { color: #CBD5E1; }
+.dark :is(.text-emerald-800, .text-emerald-900, .text-emerald-950):not([class*='dark:text-']):not(.print-area *) { color: #6EE7B7; }
+.dark :is(.text-amber-800, .text-amber-900):not([class*='dark:text-']):not(.print-area *) { color: #FCD34D; }
+.dark :is(.text-rose-700, .text-rose-800, .text-rose-900):not([class*='dark:text-']):not(.print-area *) { color: #FDA4AF; }
+.dark :is(.text-blue-800, .text-blue-900):not([class*='dark:text-']):not(.print-area *) { color: #93C5FD; }
+.dark :is(.text-orange-900):not([class*='dark:text-']):not(.print-area *) { color: #FDBA74; }
+.dark :is(.text-purple-800):not([class*='dark:text-']):not(.print-area *) { color: #D8B4FE; }
+
+.dark :is(.border-slate-200, .border-slate-300, .border-emerald-200, .border-amber-200, .border-rose-200, .border-blue-200):not([class*='dark:border-']):not(.print-area *) {
+  border-color: var(--border-color);
+}
+
+.dark :is(.hover\:bg-slate-50, .hover\:bg-slate-100, .hover\:bg-\[\#F8FAF9\], .hover\:bg-emerald-100, .hover\:bg-rose-50, .hover\:bg-slate-200, .hover\:bg-slate-300, .hover\:bg-blue-200, .hover\:bg-rose-200, .hover\:bg-amber-300, .hover\:bg-\[\#d6e5dc\]):hover:not([class*='dark:hover:bg-']) {
+  background-color: #22332B;
+}
+
+/* Scrollbar discreta */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #CBD5E1;
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+.dark ::-webkit-scrollbar-thumb {
+  background: #2F4038;
+  background-clip: content-box;
+}
+
+/*
+ * Impressão: printElement() copia o documento (.print-area) para um .print-root direto no <body>,
+ * fora do modal fixo e dos contêineres com overflow — assim ele pagina normalmente.
+ */
+.print-root {
+  display: none;
+}
+@media print {
+  html, body {
+    background: white !important;
+    color: black !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+  .print-only {
+    display: block !important;
+  }
+  body.printing > *:not(.print-root) {
+    display: none !important;
+  }
+  body.printing {
+    overflow: visible !important;
+    height: auto !important;
+  }
+  .print-root {
+    display: block;
+  }
+  .print-root .print-area {
+    border: none !important;
+    padding: 0 !important;
+  }
+  .avoid-break {
+    break-inside: avoid;
+  }
+  @page {
+    margin: 12mm;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, ::before, ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

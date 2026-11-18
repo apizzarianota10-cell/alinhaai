@@ -1,0 +1,1263 @@
+Você é um engenheiro de software sênior, arquiteto de sistemas,
+especialista em aplicações SaaS, UX/UI, sistemas de gestão clínica,
+Next.js, TypeScript, Supabase e segurança de dados.
+
+Sua missão é DESENVOLVER UM SISTEMA COMPLETO E FUNCIONAL
+DE GESTÃO PARA UMA CLÍNICA DE PILATES.
+
+IMPORTANTE:
+Não quero apenas um protótipo visual, landing page ou dashboard
+com dados estáticos.
+
+Quero uma aplicação real, modular, moderna, responsiva,
+com funcionalidades integradas e preparada para uso profissional.
+
+O sistema será utilizado inicialmente por uma clínica que
+oferece atendimentos INDIVIDUAIS de Pilates.
+
+Entretanto, a arquitetura deve permitir adicionar futuramente:
+- Fisioterapia
+- Quiropraxia
+- Outras modalidades terapêuticas
+
+O objetivo principal é eliminar a necessidade de gerenciamento
+manual por Word, planilhas e agendas físicas.
+
+==================================================
+01. STACK TECNOLÓGICA
+==================================================
+
+Utilizar:
+
+- Next.js com App Router
+- TypeScript com tipagem rigorosa
+- Tailwind CSS
+- shadcn/ui
+- Lucide React
+- Recharts
+- React Hook Form
+- Zod
+- date-fns
+- Supabase
+- PostgreSQL
+- Supabase Auth
+- Supabase Storage
+- TanStack Table
+- Bibliotecas adequadas para exportação PDF e XLSX
+
+Utilizar versões estáveis e compatíveis.
+
+Evitar dependências desnecessárias.
+
+Organizar o código por módulos e responsabilidades.
+
+Criar uma estrutura preparada para implantação na Vercel.
+
+==================================================
+02. IDENTIDADE VISUAL
+==================================================
+
+Criar uma interface premium, moderna e minimalista.
+
+Estilo:
+- SaaS profissional
+- Clínico
+- Elegante
+- Clean
+- Intuitivo
+
+Paleta sugerida:
+
+Fundo principal: #F8FAF9
+Superfícies: #FFFFFF
+Verde principal: #426B5B
+Verde secundário: #E9F1EC
+Texto principal: #17231D
+Texto secundário: #64748B
+Bordas: #E5EAE7
+
+Utilizar cantos arredondados discretos,
+sombras suaves e excelente hierarquia visual.
+
+Evitar:
+- Excesso de gradientes
+- Cores neon
+- Interfaces carregadas
+- Cards gigantes
+- Espaçamentos exagerados
+- Animações desnecessárias
+
+Criar modo claro e modo escuro.
+
+DESKTOP:
+Sidebar lateral com ícones e nomes das seções.
+
+TABLET:
+Sidebar recolhível.
+
+MOBILE:
+Navegação adaptada, com acesso rápido
+às funcionalidades mais utilizadas.
+
+Todo o sistema deve funcionar em diferentes resoluções.
+
+==================================================
+03. ESTRUTURA DE NAVEGAÇÃO
+==================================================
+
+Criar as seguintes seções:
+
+1. Visão Geral
+2. Agenda
+3. Pacientes
+4. Atendimentos
+5. Exercícios
+6. Planejamento
+7. Prontuários
+8. Financeiro
+9. Aniversariantes
+10. Relatórios
+11. Profissionais
+12. Configurações
+
+Criar navegação real entre todas as páginas.
+
+Implementar:
+- Breadcrumbs
+- Busca global
+- Notificações
+- Menus contextuais
+- Estados de carregamento
+- Tratamento de erros
+- Estados vazios
+- Confirmações para ações destrutivas
+- Toasts de feedback
+
+Nenhum botão deve ser apenas decorativo.
+
+==================================================
+04. DASHBOARD PRINCIPAL
+==================================================
+
+Criar dashboard executivo da clínica.
+
+INDICADORES:
+
+- Total de pacientes
+- Pacientes ativos
+- Pacientes inativos
+- Atendimentos agendados hoje
+- Atendimentos realizados hoje
+- Atendimentos cancelados
+- Faltas registradas
+- Receita recebida no mês
+- Valores pendentes
+- Despesas do mês
+- Resultado financeiro
+- Próximos aniversários
+
+GRÁFICOS:
+
+1. Faturamento mensal
+2. Receita por forma de pagamento
+3. Atendimentos realizados
+4. Evolução da quantidade de pacientes
+5. Comparativo de receitas e despesas
+
+VISÃO DO DIA:
+
+Criar uma seção central mostrando:
+
+- Horário
+- Nome do paciente
+- Modalidade
+- Profissional
+- Status
+- Acesso rápido ao atendimento
+
+Exemplo:
+
+08:00 — Maria Oliveira — Pilates — Confirmado
+09:00 — João Ferreira — Pilates — Em atendimento
+10:00 — Ana Beatriz — Pilates — Aguardando
+
+Criar botões:
+
+- Novo paciente
+- Novo agendamento
+- Registrar pagamento
+- Iniciar atendimento
+- Gerar relatório
+
+ALERTAS:
+
+- Aniversários próximos
+- Mensalidades vencidas
+- Pacientes com sessões acabando
+- Agendamentos do dia
+- Pendências administrativas
+
+Os indicadores devem ser calculados com dados reais
+do sistema e respeitar os filtros selecionados.
+
+==================================================
+05. GESTÃO COMPLETA DE PACIENTES
+==================================================
+
+Criar cadastro individual de pacientes.
+
+CAMPOS:
+
+- Nome completo
+- Data de nascimento
+- Telefone
+- WhatsApp
+- E-mail
+- Endereço
+- Contato de emergência
+- Data de cadastro
+- Modalidade
+- Profissional responsável
+- Status
+- Observações administrativas
+
+Criar identificação única para cada paciente.
+
+PERFIL INDIVIDUAL:
+
+O perfil deve possuir abas:
+
+1. Resumo
+2. Agenda
+3. Plano contratado
+4. Pagamentos
+5. Avaliação clínica
+6. Fichas de exercícios
+7. Evolução
+8. Histórico de atendimentos
+9. Documentos
+
+Permitir:
+- Criar
+- Visualizar
+- Editar
+- Arquivar
+- Reativar
+- Pesquisar
+- Filtrar
+
+Implementar importação de pacientes por CSV,
+com pré-visualização e validação dos campos.
+
+Não permitir duplicações acidentais.
+
+Não excluir prontuários ou históricos de forma
+irreversível por uma ação comum da interface.
+
+==================================================
+06. AGENDA INTELIGENTE
+==================================================
+
+IMPORTANTE:
+A clínica trabalha inicialmente com
+ATENDIMENTOS INDIVIDUAIS.
+
+Cada agendamento deve estar associado a:
+- Um paciente
+- Um profissional
+- Uma modalidade
+- Uma data
+- Um horário
+- Uma duração
+
+Criar visualizações:
+
+- Agenda diária
+- Agenda semanal
+- Agenda mensal
+
+Permitir:
+
+- Criar agendamento
+- Editar agendamento
+- Reagendar
+- Cancelar
+- Confirmar presença
+- Registrar falta
+- Registrar reposição
+- Finalizar atendimento
+- Criar horários recorrentes
+- Bloquear horários
+- Definir intervalos
+
+STATUS:
+
+- Agendado
+- Confirmado
+- Em atendimento
+- Realizado
+- Cancelado
+- Faltou
+- Reagendado
+
+Criar indicação visual para cada status.
+
+REGRAS:
+
+Não permitir que o mesmo profissional tenha
+dois atendimentos simultâneos.
+
+Validar conflitos de horário no servidor e
+no banco de dados, não apenas na interface.
+
+Considerar duração e intervalos.
+
+Permitir agendamentos recorrentes, como:
+
+Maria Oliveira
+Segunda-feira às 08:00
+Quarta-feira às 08:00
+Sexta-feira às 08:00
+
+Permitir editar apenas uma ocorrência
+ou uma série futura.
+
+Não duplicar sessões ao editar recorrências.
+
+INTEGRAÇÃO:
+
+Ao clicar em um agendamento, apresentar:
+
+- Dados do paciente
+- Informações do plano
+- Sessões restantes
+- Último atendimento
+- Ficha de exercícios
+- Observações autorizadas
+- Situação financeira resumida
+
+O profissional deve conseguir iniciar o atendimento
+diretamente pela agenda.
+
+==================================================
+07. CONTROLE DE PLANOS E MENSALIDADES
+==================================================
+
+Criar sistema de planos configuráveis.
+
+Exemplos:
+
+- Pilates 1 vez por semana
+- Pilates 2 vezes por semana
+- Pilates 3 vezes por semana
+- Sessão avulsa
+- Pacote de 5 sessões
+- Pacote de 10 sessões
+
+Esses exemplos não devem ter valores fixos.
+
+O administrador poderá configurar:
+
+- Nome
+- Valor
+- Quantidade de sessões
+- Frequência
+- Duração
+- Validade
+- Condições de reposição
+
+Associar planos aos pacientes.
+
+Mostrar:
+
+- Sessões contratadas
+- Sessões realizadas
+- Sessões restantes
+- Sessões canceladas
+- Sessões repostas
+- Data de início
+- Data de vencimento
+
+Não descontar sessões indevidamente.
+
+Permitir configurar regras de faltas,
+cancelamentos e reposições.
+
+==================================================
+08. GESTÃO FINANCEIRA COMPLETA
+==================================================
+
+Criar um módulo financeiro profissional.
+
+RECEITAS:
+
+- Mensalidades
+- Pacotes
+- Sessões avulsas
+- Outros recebimentos
+
+DESPESAS:
+
+- Aluguel
+- Energia
+- Água
+- Internet
+- Equipamentos
+- Manutenção
+- Materiais
+- Funcionários
+- Outras despesas
+
+FORMAS DE PAGAMENTO:
+
+- Pix
+- Dinheiro
+- Cartão de crédito
+- Cartão de débito
+- Transferência
+
+STATUS FINANCEIROS:
+
+- Pendente
+- Pago
+- Parcialmente pago
+- Vencido
+- Cancelado
+- Estornado
+
+Cada cobrança deve possuir:
+
+- Paciente
+- Descrição
+- Valor original
+- Descontos
+- Acréscimos
+- Valor final
+- Vencimento
+- Situação
+
+Permitir múltiplos recebimentos por cobrança.
+
+Exemplo:
+
+Mensalidade de R$ 200,00
+
+R$ 100,00 pagos via Pix
+R$ 100,00 pagos em dinheiro
+
+Resultado:
+Cobrança totalmente quitada.
+
+Criar:
+
+- Contas a receber
+- Contas a pagar
+- Fluxo de caixa
+- Histórico financeiro
+- Fechamento diário
+- Fechamento mensal
+- Registro de estornos
+- Comprovantes
+- Relatórios financeiros
+
+Não considerar cobranças pendentes como
+receita efetivamente recebida.
+
+Diferenciar claramente:
+- Faturamento previsto
+- Total recebido
+- Total pendente
+- Despesas pagas
+- Resultado de caixa
+
+Utilizar valores monetários em centavos,
+evitando erros de ponto flutuante.
+
+Implementar registro de auditoria
+para alterações financeiras.
+
+==================================================
+09. BIBLIOTECA INTELIGENTE DE EXERCÍCIOS
+==================================================
+
+Criar módulo completo de exercícios.
+
+CATEGORIAS INICIAIS:
+
+- Pilates Reformer
+- Pilates Step Chair
+- Pilates Solo
+- Mobilidade
+- Alongamento
+- Fortalecimento
+- Exercícios terapêuticos
+
+O usuário possui quatro PDFs de referência:
+
+1. Pilates Reformer
+2. Pilates Step Chair
+3. MAT Pilates Solo
+4. Pilates para dor lombar crônica
+
+Esses documentos poderão ser disponibilizados
+na pasta de referências do projeto.
+
+Utilizar os materiais para orientar a organização
+da biblioteca e identificar exercícios.
+
+Não copiar automaticamente fotografias,
+ilustrações ou textos protegidos para a aplicação.
+
+Exigir autorização adequada para reutilização
+de materiais de terceiros.
+
+EXERCÍCIOS INICIAIS:
+
+Adicionar exemplos conhecidos:
+
+REFORMER:
+- Knee Stretches Round
+- Mermaid
+- Footwork
+- Leg Circle
+- Short Spine Massage
+- The Hundred
+- Elephant
+- Bridge
+
+STEP CHAIR:
+- Hamstring Stretch
+- The Cat
+- Horse Back
+- Swan Front
+- Teaser
+- Footwork
+- Pull Up
+
+SOLO:
+- Swan
+- Roll Up
+- The Hundred
+- Rolling Back
+- Single Leg Stretch
+- Shoulder Bridge
+
+MOBILIDADE:
+- Open Book
+- Side to Side
+- Roll Down
+
+Esses exercícios são exemplos de catálogo,
+não prescrições automáticas.
+
+Permitir cadastro de novos exercícios.
+
+CAMPOS:
+
+- Nome
+- Categoria
+- Equipamento
+- Objetivo
+- Descrição resumida
+- Orientações
+- Variações
+- Observações
+- Referência bibliográfica
+- Status de revisão profissional
+
+FILTROS:
+
+- Nome
+- Equipamento
+- Categoria
+- Região corporal
+- Objetivo
+- Exercícios favoritos
+
+==================================================
+10. DEMONSTRAÇÕES VISUAIS
+==================================================
+
+Cada exercício poderá conter:
+
+- Imagem de capa
+- Imagem da posição inicial
+- Imagem intermediária
+- Imagem da posição final
+- GIF
+- Vídeo demonstrativo
+
+Criar componente de sequência visual.
+
+Funcionalidades:
+
+- Reprodução
+- Pausa
+- Próxima etapa
+- Etapa anterior
+- Controle de velocidade
+- Tela ampliada
+
+Permitir upload de imagens e vídeos próprios
+ou devidamente licenciados.
+
+Se não houver mídia autorizada,
+exibir placeholder adequado.
+
+Nunca utilizar imagens aleatórias de movimentos
+diferentes para completar uma sequência.
+
+Não gerar demonstrações clínicas enganosas.
+
+Toda demonstração deve poder ser revisada
+por profissional habilitado.
+
+==================================================
+11. PLANEJAMENTO INDIVIDUAL
+==================================================
+
+Criar construtor de fichas de exercícios.
+
+O profissional poderá:
+
+1. Selecionar paciente.
+2. Criar nova ficha.
+3. Definir objetivo profissional.
+4. Adicionar exercícios.
+5. Definir séries.
+6. Definir repetições.
+7. Definir duração.
+8. Definir intervalos.
+9. Adicionar observações.
+10. Salvar planejamento.
+
+Permitir:
+
+- Duplicar fichas
+- Editar
+- Arquivar
+- Criar versões
+- Consultar histórico
+- Imprimir
+- Exportar PDF
+
+Permitir associar ficha ao atendimento.
+
+Criar planejamento semanal:
+
+- Segunda-feira
+- Terça-feira
+- Quarta-feira
+- Quinta-feira
+- Sexta-feira
+- Sábado
+
+O profissional poderá selecionar quais exercícios
+serão realizados em cada sessão.
+
+Não criar prescrições automaticamente
+com base em diagnósticos.
+
+A decisão sobre exercícios e adaptações
+deve pertencer ao profissional responsável.
+
+==================================================
+12. ATENDIMENTO EM ANDAMENTO
+==================================================
+
+Criar tela específica para condução do atendimento.
+
+Ao iniciar:
+
+Mostrar:
+- Nome do paciente
+- Horário
+- Modalidade
+- Ficha planejada
+- Histórico recente
+- Observações clínicas autorizadas
+
+EXERCÍCIOS:
+
+Cada exercício deverá possuir:
+
+- Nome
+- Mídia disponível
+- Séries planejadas
+- Repetições
+- Campo de observações
+- Checkbox de execução
+
+Permitir:
+
+- Marcar exercício realizado
+- Registrar adaptação
+- Alterar parâmetros da sessão
+- Adicionar exercício
+- Remover exercício planejado
+- Registrar intercorrências
+- Finalizar atendimento
+
+Ao finalizar:
+
+- Atualizar presença
+- Registrar sessão realizada
+- Atualizar saldo de sessões conforme regra
+- Salvar evolução do atendimento
+- Atualizar dashboard
+
+Evitar registros duplicados se o profissional
+clicar duas vezes no botão de finalização.
+
+==================================================
+13. PRONTUÁRIO E EVOLUÇÃO
+==================================================
+
+Criar módulo clínico com acesso restrito.
+
+Permitir registros de:
+
+- Anamnese
+- Queixa principal
+- Histórico informado
+- Avaliação inicial
+- Objetivos terapêuticos
+- Observações
+- Evolução por atendimento
+- Reavaliações
+- Documentos anexados
+
+Os campos clínicos devem ser configuráveis
+pelo profissional responsável.
+
+Criar linha do tempo.
+
+Cada registro deve possuir:
+
+- Data
+- Horário
+- Profissional
+- Conteúdo
+- Identificador
+- Histórico de alterações
+
+Registros clínicos finalizados não devem
+ser sobrescritos silenciosamente.
+
+Utilizar adendos e trilhas de auditoria.
+
+Restringir acesso conforme função,
+vínculo profissional e autorização.
+
+==================================================
+14. SISTEMA DE ANIVERSÁRIOS
+==================================================
+
+Criar módulo especial para aniversariantes.
+
+Essa funcionalidade é PRIORITÁRIA.
+
+O administrador deseja acompanhar os aniversários
+dos pacientes e nunca esquecer uma data.
+
+Implementar alertas:
+
+3 dias antes:
+Notificação antecipada.
+
+2 dias antes:
+Paciente aparece como aniversário próximo.
+
+1 dia antes:
+Destaque visual.
+
+No dia:
+Exibir aviso em destaque no dashboard.
+
+Criar popup elegante ao entrar no sistema
+quando houver aniversários relevantes.
+
+Permitir fechar e marcar como visualizado.
+
+Não repetir continuamente o mesmo popup.
+
+Criar calendário mensal de aniversariantes.
+
+Mostrar:
+- Nome
+- Data
+- Telefone
+- Dias restantes
+
+Criar botão:
+
+"Enviar parabéns"
+
+Abrir WhatsApp com mensagem preenchida.
+
+Exemplo:
+
+"Olá, Maria! A equipe da clínica deseja
+um feliz aniversário! Que seu dia seja
+cheio de saúde e felicidade!"
+
+Permitir personalização da mensagem.
+
+Considerar corretamente aniversários em 29 de fevereiro,
+com regra configurável para anos não bissextos.
+
+==================================================
+15. RELATÓRIOS PROFISSIONAIS
+==================================================
+
+Criar central de relatórios.
+
+RELATÓRIOS:
+
+- Pacientes cadastrados
+- Pacientes ativos
+- Pacientes inativos
+- Atendimentos realizados
+- Atendimentos cancelados
+- Faltas
+- Frequência individual
+- Sessões utilizadas
+- Sessões restantes
+- Receitas recebidas
+- Despesas
+- Mensalidades vencidas
+- Formas de pagamento
+- Fluxo de caixa
+- Aniversariantes
+- Evolução de pacientes, quando autorizado
+
+FILTROS:
+
+- Hoje
+- Ontem
+- Semana
+- Mês
+- Ano
+- Período personalizado
+- Profissional
+- Paciente
+- Modalidade
+
+EXPORTAÇÃO:
+
+- PDF
+- Excel
+- CSV
+
+Os relatórios devem utilizar dados reais
+e respeitar as permissões do usuário.
+
+Arquivos financeiros e clínicos devem ter
+tratamento de acesso adequado.
+
+Os PDFs devem conter:
+
+- Nome da clínica
+- Identificação do relatório
+- Período
+- Data de emissão
+- Conteúdo organizado
+- Paginação
+
+==================================================
+16. PROFISSIONAIS E PERMISSÕES
+==================================================
+
+Criar cadastro de profissionais.
+
+Campos:
+
+- Nome
+- E-mail
+- Telefone
+- Especialidade
+- Registro profissional, quando aplicável
+- Horários disponíveis
+- Status
+
+PERFIS:
+
+ADMINISTRADOR:
+Acesso administrativo completo,
+respeitando as regras de sigilo clínico.
+
+RECEPCIONISTA:
+Agenda, cadastro administrativo e
+funções financeiras autorizadas.
+
+PROFISSIONAL:
+Agenda atribuída, fichas e prontuários
+para os quais possua autorização.
+
+As permissões devem ser aplicadas
+no servidor e banco de dados.
+
+Não confiar apenas em menus ocultos.
+
+==================================================
+17. CONFIGURAÇÕES
+==================================================
+
+Permitir configurar:
+
+- Nome da clínica
+- Logo
+- Telefone
+- WhatsApp
+- Endereço
+- Horário de funcionamento
+- Dias de atendimento
+- Modalidades
+- Profissionais
+- Planos
+- Valores
+- Regras de cancelamento
+- Regras de reposição
+- Duração padrão da sessão
+- Mensagens de aniversário
+- Aparência do sistema
+
+Utilizar essas configurações em todo o aplicativo.
+
+==================================================
+18. SUPABASE E BANCO DE DADOS
+==================================================
+
+Projetar banco relacional normalizado.
+
+Criar tabelas apropriadas para:
+
+- Clínicas
+- Perfis de usuários
+- Profissionais
+- Pacientes
+- Modalidades
+- Disponibilidades
+- Agendamentos
+- Recorrências
+- Planos
+- Contratos
+- Sessões contratadas
+- Sessões realizadas
+- Cobranças
+- Recebimentos
+- Despesas
+- Exercícios
+- Mídias de exercícios
+- Fichas
+- Itens de fichas
+- Atendimentos
+- Registros de evolução
+- Anexos clínicos
+- Notificações
+- Preferências
+- Logs de auditoria
+
+Utilizar UUIDs e relacionamentos adequados.
+
+Criar migrations versionadas.
+
+Configurar índices importantes.
+
+Implementar RLS no Supabase.
+
+Nunca utilizar service_role no navegador.
+
+Nunca expor credenciais privadas.
+
+Separar informações clínicas sensíveis
+dos dados administrativos.
+
+Aplicar princípio do menor privilégio.
+
+Criar armazenamento privado para anexos clínicos.
+
+Utilizar URLs temporárias e verificações de acesso
+para arquivos protegidos.
+
+Implementar backups e orientar a recuperação.
+
+==================================================
+19. CONFORMIDADE E SEGURANÇA
+==================================================
+
+O sistema armazenará dados pessoais e
+potencialmente dados sensíveis de saúde.
+
+Projetar a aplicação considerando a LGPD.
+
+Implementar:
+
+- Autenticação segura
+- Autorização no servidor
+- Row Level Security
+- Proteção contra acesso cruzado
+- Auditoria
+- Validação de entradas
+- Tratamento seguro de uploads
+- Separação de ambientes
+- Segredos em variáveis de ambiente
+- Política de retenção configurável
+- Mecanismos de exportação e exclusão controlada
+- Procedimentos de backup e recuperação
+
+Não armazenar dados clínicos reais
+em localStorage.
+
+Não inserir dados reais de pacientes
+em ferramentas públicas de IA.
+
+Não usar dados reais para demonstrações.
+
+Antes da produção, documentar itens que exigem
+validação jurídica e do responsável técnico da clínica.
+
+==================================================
+20. MODO DEMONSTRAÇÃO
+==================================================
+
+Criar modo de demonstração completo.
+
+Usar pacientes inteiramente fictícios.
+
+Exemplos:
+
+- Maria Oliveira
+- João Ferreira
+- Ana Beatriz
+- Carlos Henrique
+
+Popular o ambiente com:
+
+- Pacientes
+- Agendamentos
+- Pagamentos
+- Mensalidades
+- Exercícios
+- Fichas
+- Histórico fictício
+- Aniversários próximos
+- Gráficos
+
+O modo demonstração deve permitir testar:
+
+- Cadastro
+- Edição
+- Agendamentos
+- Pagamentos
+- Criação de fichas
+- Atendimento
+- Relatórios
+
+Garantir isolamento entre dados demonstrativos
+e dados reais.
+
+Não misturar registros de demonstração
+com a base de produção.
+
+==================================================
+21. REQUISITOS DE QUALIDADE
+==================================================
+
+Implementar:
+
+- Formulários funcionais
+- Máscaras apropriadas
+- Validação de dados
+- Pesquisa
+- Paginação
+- Ordenação
+- Filtros
+- Feedback visual
+- Estados de carregamento
+- Tratamento de erros
+- Confirmações
+- Responsividade
+- Acessibilidade
+- Estados vazios
+- Mensagens compreensíveis
+
+Utilizar horário da clínica com fuso
+America/Recife.
+
+Armazenar timestamps corretamente,
+considerando UTC e conversão na interface.
+
+Criar testes para regras financeiras,
+agendamentos e permissões.
+
+==================================================
+22. FLUXO PRINCIPAL OBRIGATÓRIO
+==================================================
+
+O sistema deve permitir o seguinte fluxo completo:
+
+1. Administrador cadastra paciente.
+2. Paciente contrata plano.
+3. Sistema registra cobrança.
+4. Administrador agenda atendimento individual.
+5. Profissional acessa agenda.
+6. Profissional abre ficha do paciente.
+7. Profissional consulta exercícios.
+8. Profissional monta planejamento.
+9. Atendimento é iniciado.
+10. Exercícios são registrados.
+11. Evolução é salva.
+12. Atendimento é finalizado.
+13. Saldo de sessões é atualizado.
+14. Pagamento é registrado.
+15. Dashboard apresenta dados atualizados.
+16. Relatório pode ser exportado.
+
+Todas essas operações devem compartilhar
+os mesmos dados consistentes.
+
+==================================================
+23. METODOLOGIA DE DESENVOLVIMENTO
+==================================================
+
+IMPORTANTE:
+
+Você deve trabalhar em etapas, mas o objetivo
+é entregar o sistema completo.
+
+Não construir apenas uma interface ilustrativa.
+
+ETAPA 1:
+- Examinar o repositório.
+- Definir arquitetura.
+- Criar estrutura inicial.
+- Configurar design system.
+- Implementar layout e navegação.
+
+ETAPA 2:
+- Projetar banco de dados.
+- Criar migrations.
+- Implementar autenticação e permissões.
+- Preparar ambiente demonstrativo isolado.
+
+ETAPA 3:
+- Implementar pacientes.
+- Implementar profissionais.
+- Implementar planos.
+
+ETAPA 4:
+- Implementar agenda individual.
+- Implementar recorrências.
+- Implementar presença e faltas.
+
+ETAPA 5:
+- Implementar financeiro.
+- Implementar cobranças.
+- Implementar recebimentos e despesas.
+
+ETAPA 6:
+- Implementar biblioteca de exercícios.
+- Implementar cadastro de mídias.
+- Implementar fichas individuais.
+
+ETAPA 7:
+- Implementar atendimentos.
+- Implementar prontuários.
+- Implementar evolução clínica.
+
+ETAPA 8:
+- Implementar aniversariantes.
+- Implementar notificações.
+
+ETAPA 9:
+- Implementar dashboard definitivo.
+- Implementar gráficos.
+- Implementar relatórios e exportações.
+
+ETAPA 10:
+- Revisar responsividade.
+- Revisar segurança.
+- Executar testes.
+- Corrigir falhas.
+- Preparar implantação.
+
+Após cada etapa:
+
+1. Executar verificações de TypeScript.
+2. Executar lint.
+3. Executar os testes relevantes.
+4. Registrar funcionalidades concluídas.
+5. Registrar pendências.
+6. Atualizar documentação.
+
+Não declarar uma funcionalidade concluída
+sem verificar seu comportamento.
+
+==================================================
+24. DOCUMENTAÇÃO DO PROJETO
+==================================================
+
+Criar:
+
+README.md
+ARCHITECTURE.md
+DATABASE.md
+SECURITY.md
+ROADMAP.md
+PROGRESS.md
+.env.example
+
+Documentar:
+
+- Instalação
+- Variáveis de ambiente
+- Estrutura de pastas
+- Banco de dados
+- Permissões
+- Comandos
+- Deploy
+- Funcionalidades existentes
+- Pendências conhecidas
+
+Não inserir credenciais reais
+nos arquivos de documentação.
+
+==================================================
+25. INSTRUÇÕES FINAIS
+==================================================
+
+Comece inspecionando o projeto atual.
+
+Se estiver vazio, inicialize corretamente.
+
+Defina a arquitetura e implemente
+os módulos em sequência.
+
+Não substitua funcionalidades por placeholders
+quando for possível implementá-las.
+
+Se uma integração exigir credenciais externas,
+implemente a estrutura e documente claramente
+a configuração necessária.
+
+Não invente credenciais.
+
+Se determinada funcionalidade depender de
+decisões clínicas, mantenha sua configuração
+sob controle do profissional responsável.
+
+Priorize:
+
+1. Segurança
+2. Integridade dos dados
+3. Funcionalidade
+4. Usabilidade
+5. Performance
+6. Qualidade visual
+
+O resultado deve ser uma aplicação
+profissional de gestão clínica, preparada
+para demonstração e posterior produção.
+
+INICIE O DESENVOLVIMENTO.

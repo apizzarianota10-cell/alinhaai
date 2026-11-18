@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PilatesFlow - Sistema de Gestão Clínica</title>
+    <meta name="description" content="Sistema completo e modular de gestão para clínicas de Pilates: agenda individual, prontuários, biblioteca de exercícios, planejamento, financeiro e controle de pacientes." />
+    <meta property="og:title" content="PilatesFlow - Sistema de Gestão Clínica" />
+    <meta property="og:description" content="Sistema completo e modular de gestão para clínicas de Pilates: agenda individual, prontuários, biblioteca de exercícios, planejamento, financeiro e controle de pacientes." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="theme-color" content="#426B5B" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    <script>
+      // Aplica o tema salvo antes do primeiro paint (evita "flash" claro no modo escuro)
+      try {
+        var s = JSON.parse(localStorage.getItem('pilatesflow_settings') || 'null');
+        var t = s && s.theme ? s.theme : (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+        if (t === 'dark') document.documentElement.classList.add('dark');
+      } catch (e) {}
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+

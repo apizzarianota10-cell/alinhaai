@@ -1,0 +1,7 @@
+{
+  "name": "PilatesFlow - Sistema de Gestão Clínica",
+  "description": "Sistema completo e modular de gestão para clínicas de Pilates: agenda individual, prontuários, biblioteca de exercícios, planejamento, financeiro e controle de pacientes.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
