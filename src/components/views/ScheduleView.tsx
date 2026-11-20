@@ -16,6 +16,8 @@ import {
   Filter,
   Users,
   Minus,
+  MessageCircle,
+  AlertTriangle,
 } from 'lucide-react';
 import {
   format,
@@ -37,11 +39,13 @@ import {
   describeScheduleConflict,
   formatDate,
   getClassInfo,
+  buildWhatsAppLink,
   isGroupModality,
   STATUS_LABELS,
 } from '../../lib/utils';
 import { Appointment, Patient, Professional, AppointmentStatus } from '../../types';
 import { Modal } from '../common/Modal';
+import { StatCard, Avatar, ProgressBar, Card } from '../common/Insights';
 import { useToast } from '../common/Toast';
 
 interface ScheduleViewProps {
@@ -491,404 +495,633 @@ export const ScheduleView: React.FC<ScheduleViewProps> = ({ onNavigate, initialA
       });
   };
 
-  return (
-    <div className="space-y-4">
-      {/* Top Header & Calendar Controls */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-        <div>
-          <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-[#17231D] dark:text-[#F1F5F3]">
-            Agenda de Atendimentos
-          </h1>
-          <p className="text-xs sm:text-sm text-[#64748B] dark:text-[#94A3B8]">
-            Aulas individuais e turmas de Pilates por profissional, com controle de vagas e de conflitos de horário.
-          </p>
-        </div>
+  // ───────────── presentation helpers ─────────────
+  const STATUS_STYLE: Record<string, { bar: string; chip: string; dot: string; soft: string }> = {
+    agendado: {
+      bar: 'bg-slate-400',
+      dot: 'bg-slate-400',
+      chip: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
+      soft: 'bg-slate-50 dark:bg-slate-900/40 border-slate-200 dark:border-slate-700',
+    },
+    confirmado: {
+      bar: 'bg-blue-500',
+      dot: 'bg-blue-500',
+      chip: 'bg-blue-100 text-blue-800 dark:bg-blue-950/60 dark:text-blue-300',
+      soft: 'bg-blue-50 dark:bg-blue-950/40 border-blue-200 dark:border-blue-900',
+    },
+    em_atendimento: {
+      bar: 'bg-amber-500',
+      dot: 'bg-amber-500',
+      chip: 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300',
+      soft: 'bg-amber-50 dark:bg-amber-950/40 border-amber-300 dark:border-amber-800',
+    },
+    realizado: {
+      bar: 'bg-emerald-500',
+      dot: 'bg-emerald-500',
+      chip: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300',
+      soft: 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-900',
+    },
+    faltou: {
+      bar: 'bg-rose-500',
+      dot: 'bg-rose-500',
+      chip: 'bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300',
+      soft: 'bg-rose-50 dark:bg-rose-950/40 border-rose-200 dark:border-rose-900',
+    },
+  };
+  STATUS_STYLE.cancelado = STATUS_STYLE.faltou;
+  STATUS_STYLE.reagendado = STATUS_STYLE.agendado;
+  const st = (s: string) => STATUS_STYLE[s] || STATUS_STYLE.agendado;
 
-        <div className="flex flex-wrap items-center gap-2">
-          {/* Professional filter */}
-          <div className="flex items-center gap-1.5 px-3 py-1.5 bg-white dark:bg-[#17231D] border border-[#E5EAE7] dark:border-[#273830] rounded-lg text-xs">
-            <Filter className="w-3.5 h-3.5 text-[#64748B]" />
-            <select
-              value={filterProfessionalId}
-              onChange={(e) => setFilterProfessionalId(e.target.value)}
-              className="bg-transparent border-0 text-[#17231D] dark:text-[#F1F5F3] focus:ring-0 cursor-pointer font-medium"
-            >
-              <option value="all" className="dark:bg-[#17231D]">Todos os Profissionais</option>
-              {professionals.map((p) => (
-                <option key={p.id} value={p.id} className="dark:bg-[#17231D]">
-                  {p.name}
-                </option>
-              ))}
-            </select>
+  const patientMap = new Map(clinicStorage.getPatients().map((p) => [p.id, p]));
+  const isActive = (a: Appointment) => a.status !== 'cancelado' && a.status !== 'reagendado';
+  const toMin = (t: string) => {
+    const [h, m] = t.split(':').map(Number);
+    return h * 60 + m;
+  };
+  const todayStr = format(new Date(), 'yyyy-MM-dd');
+  const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
+
+  /** One calendar block: a single booking, or every student of a class at the same slot */
+  type Block = { key: string; appts: Appointment[]; isClass: boolean; capacity: number; first: Appointment };
+  const toBlocks = (list: Appointment[]): Block[] => {
+    const map = new Map<string, Appointment[]>();
+    list.forEach((a) => {
+      const key =
+        isGroupModality(a.modality) && isActive(a)
+          ? `cls|${a.date}|${a.professionalId}|${a.startTime}|${a.durationMinutes}|${a.modality}`
+          : `one|${a.id}`;
+      map.set(key, [...(map.get(key) || []), a]);
+    });
+    return [...map.entries()]
+      .map(([key, appts]) => {
+        const first = appts[0];
+        const capacity = key.startsWith('cls') ? getClassInfo(appointments, first).capacity : 1;
+        return { key, appts, isClass: key.startsWith('cls') && (capacity > 1 || appts.length > 1), capacity, first };
+      })
+      .sort((a, b) => a.first.startTime.localeCompare(b.first.startTime) || a.first.professionalName.localeCompare(b.first.professionalName));
+  };
+
+  // period shown by the current view (feeds the indicator cards)
+  const weekStart = startOfWeek(selectedDate, { weekStartsOn: 1 });
+  const periodRange: [string, string] =
+    viewMode === 'day'
+      ? [format(selectedDate, 'yyyy-MM-dd'), format(selectedDate, 'yyyy-MM-dd')]
+      : viewMode === 'week'
+      ? [format(weekStart, 'yyyy-MM-dd'), format(addDays(weekStart, 6), 'yyyy-MM-dd')]
+      : [format(startOfMonth(selectedDate), 'yyyy-MM-dd'), format(endOfMonth(selectedDate), 'yyyy-MM-dd')];
+  const periodAppts = filteredAppointments.filter((a) => a.date >= periodRange[0] && a.date <= periodRange[1]);
+  const kpi = {
+    total: periodAppts.filter(isActive).length,
+    confirmed: periodAppts.filter((a) => a.status === 'confirmado').length,
+    pending: periodAppts.filter((a) => a.status === 'agendado').length,
+    done: periodAppts.filter((a) => a.status === 'realizado').length,
+    missed: periodAppts.filter((a) => a.status === 'faltou' || a.status === 'cancelado').length,
+  };
+  const periodWord = viewMode === 'day' ? (isSameDay(selectedDate, new Date()) ? 'hoje' : 'no dia') : viewMode === 'week' ? 'na semana' : 'no mês';
+
+  const reminderLink = (a: Appointment) => {
+    const p = patientMap.get(a.patientId);
+    const phone = p?.whatsapp || p?.phone;
+    if (!phone) return null;
+    const when = a.date === todayStr ? 'hoje' : formatDate(a.date, "EEEE, dd/MM");
+    return buildWhatsAppLink(
+      phone,
+      `Olá, ${a.patientName.split(' ')[0]}! Passando para lembrar da sua sessão de ${a.modality} ${when} às ${a.startTime} na ${settings.clinicName}. Podemos confirmar?`
+    );
+  };
+
+  const goPeriod = (dir: -1 | 1) => {
+    if (viewMode === 'day') setSelectedDate(dir < 0 ? subDays(selectedDate, 1) : addDays(selectedDate, 1));
+    else if (viewMode === 'week') setSelectedDate(addDays(selectedDate, 7 * dir));
+    else setSelectedDate(addMonths(selectedDate, dir));
+  };
+  const periodLabel =
+    viewMode === 'day'
+      ? format(selectedDate, "EEEE, dd 'de' MMMM", { locale: ptBR })
+      : viewMode === 'week'
+      ? `${format(weekStart, 'dd MMM', { locale: ptBR })} – ${format(addDays(weekStart, 5), "dd MMM yyyy", { locale: ptBR })}`
+      : format(selectedDate, "MMMM 'de' yyyy", { locale: ptBR });
+
+  /** Card of one block in the day view */
+  const renderDayBlock = (b: Block) => {
+    const a = b.first;
+    const end = a.endTime;
+    const isNow = a.date === todayStr && nowMin >= toMin(a.startTime) && nowMin < toMin(a.startTime) + (a.durationMinutes || 50);
+    const s = st(b.isClass ? (b.appts.every((x) => x.status === 'realizado') ? 'realizado' : 'confirmado') : a.status);
+    const free = b.capacity - b.appts.filter(isActive).length;
+    return (
+      <article
+        key={b.key}
+        className={`relative flex rounded-xl border bg-white dark:bg-[#141F19] overflow-hidden ${
+          isNow ? 'border-[#426B5B] ring-1 ring-[#426B5B]' : 'border-[#E5EAE7] dark:border-[#273830]'
+        }`}
+      >
+        <span className={`w-1.5 shrink-0 ${s.bar}`} aria-hidden />
+        <div className="flex-1 min-w-0 p-3 space-y-2.5">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px]">
+            <span className="font-bold text-sm text-[#17231D] dark:text-[#F1F5F3]">
+              {a.startTime} – {end}
+            </span>
+            <span className="text-[#64748B]">{a.durationMinutes} min</span>
+            <span className="px-1.5 py-0.5 rounded-md bg-[#E9F1EC] dark:bg-[#1F332A] text-[#345648] dark:text-[#9CCBB8] font-semibold">{a.modality}</span>
+            {b.isClass && (
+              <span className="px-1.5 py-0.5 rounded-md bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 font-semibold flex items-center gap-1">
+                <Users className="w-3 h-3" /> Turma {b.appts.filter(isActive).length}/{b.capacity}
+              </span>
+            )}
+            {!b.isClass && <span className={`px-1.5 py-0.5 rounded-md font-semibold ${s.chip}`}>{STATUS_LABELS[a.status] || a.status}</span>}
+            {isNow && <span className="px-1.5 py-0.5 rounded-md bg-[#426B5B] text-white font-bold animate-pulse">Agora</span>}
+            <span className="ml-auto flex items-center gap-1.5 text-[#64748B]">
+              <Avatar name={a.professionalName.replace(/^(Dra?\.|Prof\.)\s*/i, '')} size="sm" />
+              <span className="hidden sm:inline truncate max-w-[10rem]">{a.professionalName}</span>
+            </span>
           </div>
 
-          {/* Modality filter */}
-          <div className="flex items-center gap-1.5 px-3 py-1.5 bg-white dark:bg-[#17231D] border border-[#E5EAE7] dark:border-[#273830] rounded-lg text-xs">
-            <select
-              value={filterModality}
-              onChange={(e) => setFilterModality(e.target.value)}
-              className="bg-transparent border-0 text-[#17231D] dark:text-[#F1F5F3] focus:ring-0 cursor-pointer font-medium"
-            >
-              <option value="all" className="dark:bg-[#17231D]">Todas as Modalidades</option>
-              {(settings.serviceAreas || []).map((a) => (
-                <option key={a.id} value={a.name} className="dark:bg-[#17231D]">
-                  {a.name}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* View mode toggle */}
-          <div className="flex items-center bg-[#F8FAF9] dark:bg-[#111A15] p-1 border border-[#E5EAE7] dark:border-[#273830] rounded-lg">
-            <button
-              onClick={() => setViewMode('day')}
-              className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-colors ${
-                viewMode === 'day'
-                  ? 'bg-white dark:bg-[#17231D] text-[#426B5B] dark:text-[#5A8E7A] shadow-xs'
-                  : 'text-[#64748B]'
-              }`}
-            >
-              Dia
-            </button>
-            <button
-              onClick={() => setViewMode('week')}
-              className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-colors ${
-                viewMode === 'week'
-                  ? 'bg-white dark:bg-[#17231D] text-[#426B5B] dark:text-[#5A8E7A] shadow-xs'
-                  : 'text-[#64748B]'
-              }`}
-            >
-              Semana
-            </button>
-            <button
-              onClick={() => setViewMode('month')}
-              className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-colors ${
-                viewMode === 'month'
-                  ? 'bg-white dark:bg-[#17231D] text-[#426B5B] dark:text-[#5A8E7A] shadow-xs'
-                  : 'text-[#64748B]'
-              }`}
-            >
-              Mês
-            </button>
-          </div>
-
-          {/* New Appointment Button */}
-          <button
-            onClick={() => handleOpenNewModal()}
-            className="flex items-center gap-1.5 px-3 py-2 bg-[#426B5B] hover:bg-[#345648] text-white text-xs sm:text-sm font-semibold rounded-lg shadow-sm transition-transform active:scale-95"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Novo Agendamento</span>
-          </button>
-        </div>
-      </div>
-
-      {/* Navigation Controls Bar */}
-      <div className="p-3 bg-white dark:bg-[#17231D] border border-[#E5EAE7] dark:border-[#273830] rounded-xl flex items-center justify-between shadow-xs">
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => {
-              if (viewMode === 'day') setSelectedDate(subDays(selectedDate, 1));
-              else if (viewMode === 'week') setSelectedDate(addDays(selectedDate, -7));
-              else setSelectedDate(addMonths(selectedDate, -1));
-            }}
-            className="p-1.5 rounded-lg border border-[#E5EAE7] dark:border-[#273830] hover:bg-[#F8FAF9] dark:hover:bg-[#1F332A] text-[#64748B]"
-          >
-            <ChevronLeft className="w-4 h-4" />
-          </button>
-
-          <button
-            onClick={() => setSelectedDate(new Date())}
-            className="px-3 py-1.5 text-xs font-semibold border border-[#E5EAE7] dark:border-[#273830] hover:bg-[#F8FAF9] dark:hover:bg-[#1F332A] rounded-lg text-[#17231D] dark:text-[#F1F5F3]"
-          >
-            Hoje
-          </button>
-
-          <button
-            onClick={() => {
-              if (viewMode === 'day') setSelectedDate(addDays(selectedDate, 1));
-              else if (viewMode === 'week') setSelectedDate(addDays(selectedDate, 7));
-              else setSelectedDate(addMonths(selectedDate, 1));
-            }}
-            className="p-1.5 rounded-lg border border-[#E5EAE7] dark:border-[#273830] hover:bg-[#F8FAF9] dark:hover:bg-[#1F332A] text-[#64748B]"
-          >
-            <ChevronRight className="w-4 h-4" />
-          </button>
-
-          <span className="ml-2 font-bold text-sm text-[#17231D] dark:text-[#F1F5F3] capitalize">
-            {viewMode === 'day'
-              ? format(selectedDate, "EEEE, dd 'de' MMMM", { locale: ptBR })
-              : format(selectedDate, "MMMM 'de' yyyy", { locale: ptBR })}
-          </span>
-        </div>
-
-        {/* Legend */}
-        <div className="hidden lg:flex items-center gap-3 text-xs">
-          <span className="flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded-full bg-blue-500" />
-            <span className="text-[#64748B]">Confirmado</span>
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded-full bg-amber-500" />
-            <span className="text-[#64748B]">Em Atendimento</span>
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
-            <span className="text-[#64748B]">Realizado</span>
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded-full bg-rose-500" />
-            <span className="text-[#64748B]">Cancelado / Falta</span>
-          </span>
-        </div>
-      </div>
-
-      {/* CALENDAR BODY */}
-      {viewMode === 'week' && (
-        <div className="bg-white dark:bg-[#17231D] border border-[#E5EAE7] dark:border-[#273830] rounded-xl overflow-x-auto shadow-xs">
-          <div className="min-w-[800px]">
-            {/* Days Header */}
-            {(() => {
-              const weekStart = startOfWeek(selectedDate, { weekStartsOn: 1 }); // Monday
-              const weekDays = Array.from({ length: 6 }).map((_, i) => addDays(weekStart, i)); // Seg - Sab
-
-              return (
-                <div className="grid grid-cols-7 border-b border-[#E5EAE7] dark:border-[#273830] bg-[#F8FAF9]/80 dark:bg-[#111A15]">
-                  <div className="p-3 text-center border-r border-[#E5EAE7] dark:border-[#273830] text-xs font-semibold text-[#64748B]">
-                    Horário
-                  </div>
-                  {weekDays.map((day) => {
-                    const isToday = isSameDay(day, new Date());
-                    return (
-                      <div
-                        key={day.toISOString()}
-                        className={`p-3 text-center border-r border-[#E5EAE7] dark:border-[#273830] last:border-r-0 ${
-                          isToday ? 'bg-[#E9F1EC] dark:bg-[#1F332A]' : ''
-                        }`}
-                      >
-                        <p className="text-[11px] uppercase font-bold text-[#64748B] dark:text-[#94A3B8]">
-                          {format(day, 'EEE', { locale: ptBR })}
-                        </p>
-                        <p
-                          className={`text-sm font-extrabold mt-0.5 ${
-                            isToday ? 'text-[#426B5B] dark:text-[#5A8E7A]' : 'text-[#17231D] dark:text-[#F1F5F3]'
-                          }`}
-                        >
-                          {format(day, 'dd/MM')}
-                        </p>
-                      </div>
-                    );
-                  })}
-                </div>
-              );
-            })()}
-
-            {/* Time Rows */}
-            <div className="divide-y divide-[#E5EAE7] dark:divide-[#273830]">
-              {timeSlots.map((time) => {
-                const weekStart = startOfWeek(selectedDate, { weekStartsOn: 1 });
-                const weekDays = Array.from({ length: 6 }).map((_, i) => addDays(weekStart, i));
-
-                return (
-                  <div key={time} className="grid grid-cols-7 min-h-[64px]">
-                    <div className="p-2 border-r border-[#E5EAE7] dark:border-[#273830] text-center font-mono text-xs text-[#64748B] bg-[#F8FAF9]/40 dark:bg-[#111A15]/40 flex items-center justify-center">
-                      {time}
-                    </div>
-
-                    {weekDays.map((day) => {
-                      const dayStr = format(day, 'yyyy-MM-dd');
-                      const matchAppts = filteredAppointments.filter(
-                        (a) => a.date === dayStr && a.startTime.startsWith(time.split(':')[0])
-                      );
-
-                      return (
-                        <div
-                          key={dayStr}
-                          onClick={() => matchAppts.length === 0 && handleOpenNewModal(dayStr, time)}
-                          className="p-1 border-r border-[#E5EAE7] dark:border-[#273830] last:border-r-0 hover:bg-[#F8FAF9]/50 dark:hover:bg-[#111A15]/50 transition-colors cursor-pointer relative"
-                        >
-                          {matchAppts.map((appt) => (
-                            <div
-                              key={appt.id}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setAppointmentDetailModal(appt);
-                              }}
-                              className={`p-1.5 rounded-lg border text-xs shadow-xs mb-1 transition-transform hover:scale-[1.02] cursor-pointer ${
-                                appt.status === 'confirmado'
-                                  ? 'bg-blue-50 dark:bg-blue-950/60 border-blue-200 dark:border-blue-800 text-blue-900 dark:text-blue-100'
-                                  : appt.status === 'em_atendimento'
-                                  ? 'bg-amber-50 dark:bg-amber-950/60 border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-100 animate-pulse'
-                                  : appt.status === 'realizado'
-                                  ? 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-200 dark:border-emerald-800 text-emerald-900 dark:text-emerald-100'
-                                  : 'bg-slate-100 dark:bg-slate-800 border-slate-300 dark:border-slate-700 text-slate-800 dark:text-slate-200'
-                              }`}
-                            >
-                              <div className="flex items-center justify-between font-bold leading-tight">
-                                <span className="truncate">{appt.patientName}</span>
-                                <span className="text-[10px] font-mono">{appt.startTime}</span>
-                              </div>
-                              <div className="flex items-center justify-between text-[10px] text-[#64748B] dark:text-[#94A3B8] mt-0.5">
-                                <span className="truncate">{appt.professionalName.split(' ')[1] || appt.professionalName}</span>
-                                <span className="font-medium capitalize">{appt.modality}</span>
-                              </div>
-                            </div>
-                          ))}
-                          {renderClassButtons(matchAppts, dayStr, true)}
-                        </div>
-                      );
-                    })}
-                  </div>
-                );
-              })}
+          {b.isClass ? (
+            <div className="space-y-2">
+              <ProgressBar value={b.appts.filter(isActive).length} max={b.capacity} tone={free > 0 ? 'blue' : 'amber'} label="Vagas da turma" />
+              <ul className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                {b.appts.map((x) => (
+                  <li key={x.id}>
+                    <button
+                      onClick={() => setAppointmentDetailModal(x)}
+                      className="w-full flex items-center gap-2 p-1.5 rounded-lg hover:bg-[#F8FAF9] dark:hover:bg-[#1F332A] text-left"
+                    >
+                      <Avatar name={x.patientName} size="sm" />
+                      <span className="flex-1 min-w-0 text-xs font-semibold truncate">{x.patientName}</span>
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${st(x.status).chip}`}>{STATUS_LABELS[x.status] || x.status}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              {free > 0 && (
+                <button
+                  onClick={() => handleOpenNewModal(a.date, a.startTime, a)}
+                  className="flex items-center gap-1 text-xs font-semibold text-[#426B5B] dark:text-[#7FB39F] hover:underline"
+                >
+                  <Plus className="w-3.5 h-3.5" /> Adicionar aluno ({free} vaga{free > 1 ? 's' : ''})
+                </button>
+              )}
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* DAY VIEW */}
-      {viewMode === 'day' && (
-        <div className="bg-white dark:bg-[#17231D] border border-[#E5EAE7] dark:border-[#273830] rounded-xl p-4 shadow-xs">
-          <div className="divide-y divide-[#E5EAE7] dark:divide-[#273830]">
-            {timeSlots.map((time) => {
-              const dayStr = format(selectedDate, 'yyyy-MM-dd');
-              const match = filteredAppointments.filter(
-                (a) => a.date === dayStr && a.startTime.startsWith(time.split(':')[0])
-              );
-
+          ) : (
+            (() => {
+              const p = patientMap.get(a.patientId);
+              const link = reminderLink(a);
               return (
-                <div key={time} className="py-3 flex items-start gap-4">
-                  <span className="font-mono text-xs font-bold text-[#64748B] w-14 pt-1">
-                    {time}
-                  </span>
-                  <div className="flex-1">
-                    {match.length > 0 ? (
-                      <>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                        {match.map((appt) => (
-                          <div
-                            key={appt.id}
-                            onClick={() => setAppointmentDetailModal(appt)}
-                            className="p-3 rounded-xl border border-[#E5EAE7] dark:border-[#273830] bg-[#F8FAF9] dark:bg-[#111A15] hover:border-[#426B5B] transition-colors cursor-pointer flex items-center justify-between"
-                          >
-                            <div>
-                              <div className="flex items-center gap-2">
-                                <span className="font-bold text-sm text-[#17231D] dark:text-[#F1F5F3]">
-                                  {appt.patientName}
-                                </span>
-                                <span
-                                  className={`text-[10px] px-2 py-0.5 rounded font-semibold ${
-                                    appt.status === 'confirmado'
-                                      ? 'bg-blue-100 text-blue-800 dark:bg-blue-950/60 dark:text-blue-300'
-                                      : appt.status === 'realizado'
-                                      ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'
-                                      : appt.status === 'em_atendimento'
-                                      ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300'
-                                      : appt.status === 'cancelado' || appt.status === 'faltou'
-                                      ? 'bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300'
-                                      : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
-                                  }`}
-                                >
-                                  {STATUS_LABELS[appt.status] || appt.status}
-                                </span>
-                              </div>
-                              <p className="text-xs text-[#64748B] mt-0.5">
-                                {appt.startTime} às {appt.endTime} • Prof. {appt.professionalName} ({appt.modality})
-                              </p>
-                            </div>
-                            {(isStartable(appt) || appt.status === 'em_atendimento') && (
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleStartAttendance(appt);
-                                }}
-                                className="px-3 py-1.5 bg-[#426B5B] hover:bg-[#345648] text-white text-xs font-semibold rounded-lg flex items-center gap-1 shadow-xs"
-                              >
-                                <Play className="w-3.5 h-3.5 fill-current" />
-                                <span>{appt.status === 'em_atendimento' ? 'Continuar' : 'Atender'}</span>
-                              </button>
-                            )}
-                          </div>
-                        ))}
-                        </div>
-                        {renderClassButtons(match, dayStr, false)}
-                      </>
-                    ) : (
+                <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                  <button onClick={() => setAppointmentDetailModal(a)} className="flex-1 min-w-0 flex items-center gap-2.5 text-left">
+                    <Avatar name={a.patientName} />
+                    <span className="min-w-0">
+                      <span className="block font-semibold text-sm truncate">{a.patientName}</span>
+                      <span className="flex flex-wrap items-center gap-x-2 text-[11px] text-[#64748B]">
+                        {p && (
+                          <span className={p.sessionsRemaining <= 2 ? 'text-rose-600 font-semibold' : ''}>
+                            {p.sessionsRemaining} {p.sessionsRemaining === 1 ? 'sessão restante' : 'sessões restantes'}
+                          </span>
+                        )}
+                        {p?.clinicalAlerts && p.clinicalAlerts.length > 0 && (
+                          <span className="flex items-center gap-0.5 text-rose-600 dark:text-rose-400" title={p.clinicalAlerts.join(' • ')}>
+                            <AlertTriangle className="w-3 h-3" /> {p.clinicalAlerts[0]}
+                          </span>
+                        )}
+                      </span>
+                    </span>
+                  </button>
+                  <div className="flex flex-wrap gap-1.5 sm:justify-end">
+                    {a.status === 'agendado' && (
                       <button
-                        onClick={() => handleOpenNewModal(dayStr, time)}
-                        className="text-xs text-slate-400 hover:text-[#426B5B] py-1 flex items-center gap-1"
+                        onClick={() => handleUpdateStatus(a.id, 'confirmado')}
+                        className="flex-1 sm:flex-none flex items-center justify-center gap-1 px-3 py-2 text-xs font-semibold rounded-lg border border-blue-300 text-blue-700 dark:border-blue-800 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-950/40"
                       >
-                        <Plus className="w-3 h-3" />
-                        <span>Disponível para agendamento</span>
+                        <Check className="w-3.5 h-3.5" /> Confirmar
+                      </button>
+                    )}
+                    {link && (isStartable(a) || a.status === 'agendado') && (
+                      <a
+                        href={link}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="flex items-center justify-center gap-1 px-3 py-2 text-xs font-semibold rounded-lg border border-emerald-300 text-emerald-700 dark:border-emerald-800 dark:text-emerald-300 hover:bg-emerald-50 dark:hover:bg-emerald-950/40"
+                        title="Enviar lembrete pelo WhatsApp"
+                      >
+                        <MessageCircle className="w-3.5 h-3.5" /> <span className="sm:hidden lg:inline">Lembrete</span>
+                      </a>
+                    )}
+                    {(isStartable(a) || a.status === 'em_atendimento') && (
+                      <button
+                        onClick={() => handleStartAttendance(a)}
+                        className="flex-1 sm:flex-none flex items-center justify-center gap-1 px-3 py-2 bg-[#426B5B] hover:bg-[#345648] text-white text-xs font-semibold rounded-lg"
+                      >
+                        <Play className="w-3.5 h-3.5 fill-current" /> {a.status === 'em_atendimento' ? 'Continuar' : 'Atender'}
                       </button>
                     )}
                   </div>
                 </div>
               );
-            })}
+            })()
+          )}
+        </div>
+      </article>
+    );
+  };
+
+  /** Compact block for week / month grids */
+  const renderMiniBlock = (b: Block, dense = false) => {
+    const a = b.first;
+    const s = st(b.isClass ? 'confirmado' : a.status);
+    return (
+      <button
+        key={b.key}
+        onClick={(e) => {
+          e.stopPropagation();
+          if (b.isClass) {
+            setSelectedDate(parseISO(a.date));
+            setViewMode('day');
+          } else setAppointmentDetailModal(a);
+        }}
+        title={b.appts.map((x) => x.patientName).join(', ')}
+        className={`w-full flex text-left rounded-md border overflow-hidden mb-1 hover:shadow-sm transition-shadow ${s.soft}`}
+      >
+        <span className={`w-1 shrink-0 ${s.bar}`} aria-hidden />
+        <span className={`flex-1 min-w-0 ${dense ? 'px-1 py-0.5' : 'px-1.5 py-1'}`}>
+          <span className="flex items-center justify-between gap-1 text-[10px] font-mono text-[#64748B]">
+            <span>{a.startTime}</span>
+            {b.isClass && <span className="font-sans font-bold text-amber-700 dark:text-amber-300">{b.appts.filter(isActive).length}/{b.capacity}</span>}
+          </span>
+          <span className="block text-[11px] font-semibold truncate text-[#17231D] dark:text-[#F1F5F3]">
+            {b.isClass ? `Turma ${a.modality}` : a.patientName}
+          </span>
+          {!dense && (
+            <span className="block text-[10px] text-[#64748B] truncate">
+              {b.isClass ? b.appts.map((x) => x.patientName.split(' ')[0]).join(', ') : a.professionalName.split(' ').slice(0, 2).join(' ')}
+            </span>
+          )}
+        </span>
+      </button>
+    );
+  };
+
+  const viewBtn = (v: typeof viewMode, label: string) => (
+    <button
+      onClick={() => setViewMode(v)}
+      aria-pressed={viewMode === v}
+      className={`flex-1 sm:flex-none px-3 py-1.5 text-xs font-semibold rounded-md transition-colors ${
+        viewMode === v ? 'bg-white dark:bg-[#17231D] text-[#426B5B] dark:text-[#7FB39F] shadow-xs' : 'text-[#64748B]'
+      }`}
+    >
+      {label}
+    </button>
+  );
+  const selectCls =
+    'w-full sm:w-auto px-3 py-2 text-xs font-semibold bg-[#F8FAF9] dark:bg-[#111A15] border border-[#E5EAE7] dark:border-[#273830] rounded-lg text-[#17231D] dark:text-[#F1F5F3]';
+
+  const dayStr = format(selectedDate, 'yyyy-MM-dd');
+  const dayAppts = filteredAppointments.filter((a) => a.date === dayStr);
+  const dayBlocks = toBlocks(dayAppts);
+  const upcoming = dayStr === todayStr ? dayBlocks.find((b) => toMin(b.first.startTime) >= nowMin && b.appts.some((x) => isStartable(x))) : undefined;
+  const team = [...new Set(dayAppts.filter(isActive).map((a) => a.professionalId))].map((id) => {
+    const list = dayAppts.filter((a) => a.professionalId === id && isActive(a)).sort((x, y) => x.startTime.localeCompare(y.startTime));
+    return { id, name: list[0].professionalName, count: toBlocks(list).length, students: list.length, from: list[0].startTime, to: list[list.length - 1].endTime };
+  });
+
+  return (
+    <div className="space-y-4">
+      {/* Title */}
+      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
+        <div>
+          <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-[#17231D] dark:text-[#F1F5F3] flex items-center gap-2">
+            <CalendarIcon className="w-6 h-6 text-[#426B5B] dark:text-[#7FB39F]" /> Agenda
+          </h1>
+          <p className="text-xs sm:text-sm text-[#64748B] dark:text-[#94A3B8]">
+            Aulas individuais e turmas por profissional, com controle de vagas, confirmação e lembretes.
+          </p>
+        </div>
+        <button
+          onClick={() => handleOpenNewModal()}
+          className="self-start sm:self-auto flex items-center gap-1.5 px-4 py-2.5 bg-[#426B5B] hover:bg-[#345648] text-white text-sm font-semibold rounded-lg shadow-sm transition-transform active:scale-95"
+        >
+          <Plus className="w-4 h-4" /> Novo agendamento
+        </button>
+      </div>
+
+      {/* Toolbar */}
+      <div className="p-3 bg-white dark:bg-[#17231D] border border-[#E5EAE7] dark:border-[#273830] rounded-xl shadow-xs space-y-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-1">
+            <button onClick={() => goPeriod(-1)} aria-label="Anterior" className="p-2 rounded-lg border border-[#E5EAE7] dark:border-[#273830] hover:bg-[#F8FAF9] dark:hover:bg-[#1F332A] text-[#64748B]">
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => setSelectedDate(new Date())}
+              className="px-3 py-1.5 text-xs font-semibold border border-[#E5EAE7] dark:border-[#273830] hover:bg-[#F8FAF9] dark:hover:bg-[#1F332A] rounded-lg"
+            >
+              Hoje
+            </button>
+            <button onClick={() => goPeriod(1)} aria-label="Próximo" className="p-2 rounded-lg border border-[#E5EAE7] dark:border-[#273830] hover:bg-[#F8FAF9] dark:hover:bg-[#1F332A] text-[#64748B]">
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          </div>
+          <span className="font-bold text-sm sm:text-base capitalize flex-1 min-w-[10rem]">{periodLabel}</span>
+          <div className="w-full sm:w-auto flex items-center bg-[#F8FAF9] dark:bg-[#111A15] p-1 border border-[#E5EAE7] dark:border-[#273830] rounded-lg">
+            {viewBtn('day', 'Dia')}
+            {viewBtn('week', 'Semana')}
+            {viewBtn('month', 'Mês')}
+          </div>
+        </div>
+        <div className="flex flex-col sm:flex-row sm:items-center gap-2 pt-3 border-t border-[#E5EAE7] dark:border-[#273830]">
+          <div className="flex items-center gap-2 flex-1 flex-wrap">
+            <Filter className="hidden sm:block w-3.5 h-3.5 text-[#64748B]" />
+            <select value={filterProfessionalId} onChange={(e) => setFilterProfessionalId(e.target.value)} aria-label="Profissional" className={selectCls}>
+              <option value="all">Todos os profissionais</option>
+              {professionals.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+            <select value={filterModality} onChange={(e) => setFilterModality(e.target.value)} aria-label="Modalidade" className={selectCls}>
+              <option value="all">Todas as modalidades</option>
+              {(settings.serviceAreas || []).map((a) => (
+                <option key={a.id} value={a.name}>
+                  {a.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-[#64748B]">
+            {[
+              ['agendado', 'A confirmar'],
+              ['confirmado', 'Confirmado'],
+              ['em_atendimento', 'Em atendimento'],
+              ['realizado', 'Realizado'],
+              ['faltou', 'Falta / cancelado'],
+            ].map(([k, l]) => (
+              <span key={k} className="flex items-center gap-1.5">
+                <span className={`w-2.5 h-2.5 rounded-full ${st(k).dot}`} />
+                {l}
+              </span>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Indicators of the period on screen */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <StatCard label={`Sessões ${periodWord}`} value={kpi.total} hint={`${toBlocks(periodAppts.filter(isActive)).length} horários ocupados`} icon={CalendarDays} />
+        <StatCard
+          label="Confirmadas"
+          value={kpi.confirmed}
+          hint={`${kpi.pending} aguardando confirmação`}
+          icon={Check}
+          tone="blue"
+        />
+        <StatCard
+          label="Realizadas"
+          value={kpi.done}
+          hint={kpi.total ? `${Math.round((kpi.done / kpi.total) * 100)}% do ${viewMode === 'day' ? 'dia' : viewMode === 'week' ? 'período' : 'mês'}` : '—'}
+          icon={CheckCircle2}
+          tone="green"
+        />
+        <StatCard label="Faltas e cancelamentos" value={kpi.missed} hint={kpi.missed ? 'veja reposições no detalhe' : 'nenhuma no período'} icon={X} tone="rose" />
+      </div>
+
+      {/* DAY VIEW */}
+      {viewMode === 'day' && (
+        <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_18rem] gap-4 items-start">
+          <div className="bg-white dark:bg-[#17231D] border border-[#E5EAE7] dark:border-[#273830] rounded-xl p-3 sm:p-4 shadow-xs">
+            {(() => {
+              // hours with bookings get their cards; runs of empty hours collapse into one "livre" row
+              const rows: React.ReactNode[] = [];
+              let freeStart: string | null = null;
+              let freeEnd = '';
+              const flushFree = () => {
+                if (!freeStart) return;
+                const start = freeStart;
+                rows.push(
+                  <div key={`free-${start}`} className="flex items-center gap-3 py-2">
+                    <span className="w-12 shrink-0 font-mono text-[11px] text-[#94A3B8]">{start}</span>
+                    <div className="flex-1 flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-dashed border-[#E5EAE7] dark:border-[#273830]">
+                      <span className="text-xs text-[#94A3B8]">
+                        Livre {start === freeEnd ? '' : `${start} – ${freeEnd}`}
+                      </span>
+                      <button
+                        onClick={() => handleOpenNewModal(dayStr, start)}
+                        className="flex items-center gap-1 text-xs font-semibold text-[#426B5B] dark:text-[#7FB39F] hover:underline"
+                      >
+                        <Plus className="w-3.5 h-3.5" /> Agendar
+                      </button>
+                    </div>
+                  </div>
+                );
+                freeStart = null;
+              };
+              timeSlots.forEach((time) => {
+                const hourBlocks = dayBlocks.filter((b) => b.first.startTime.startsWith(time.slice(0, 2)));
+                const h = parseInt(time, 10);
+                const nowHere = dayStr === todayStr && Math.floor(nowMin / 60) === h;
+                if (hourBlocks.length === 0 && !nowHere) {
+                  if (!freeStart) freeStart = time;
+                  freeEnd = `${String(h + 1).padStart(2, '0')}:00`;
+                  return;
+                }
+                flushFree();
+                rows.push(
+                  <div key={time} className="flex gap-3 py-2">
+                    <div className="w-12 shrink-0 pt-1">
+                      <span className={`font-mono text-xs font-bold ${nowHere ? 'text-[#426B5B] dark:text-[#7FB39F]' : 'text-[#64748B]'}`}>{time}</span>
+                      {nowHere && (
+                        <span className="mt-1 block text-[9px] font-bold uppercase text-white bg-rose-500 rounded px-1 text-center">
+                          {format(new Date(), 'HH:mm')}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0 space-y-2">
+                      {hourBlocks.length === 0 ? (
+                        <div className="flex items-center gap-2 py-2">
+                          <span className="h-px flex-1 bg-rose-400" />
+                          <button onClick={() => handleOpenNewModal(dayStr, time)} className="text-xs font-semibold text-[#426B5B] dark:text-[#7FB39F] hover:underline">
+                            + Agendar agora
+                          </button>
+                        </div>
+                      ) : (
+                        hourBlocks.map(renderDayBlock)
+                      )}
+                    </div>
+                  </div>
+                );
+              });
+              flushFree();
+              return <div className="divide-y divide-[#E5EAE7] dark:divide-[#273830]">{rows}</div>;
+            })()}
+          </div>
+
+          {/* side panel */}
+          <aside className="space-y-4">
+            <Card title="Próximo atendimento">
+              {upcoming ? (
+                <button onClick={() => setAppointmentDetailModal(upcoming.first)} className="w-full flex items-center gap-3 text-left">
+                  <Avatar name={upcoming.isClass ? upcoming.first.modality : upcoming.first.patientName} />
+                  <span className="min-w-0">
+                    <span className="block text-sm font-bold truncate">
+                      {upcoming.isClass ? `Turma ${upcoming.first.modality} (${upcoming.appts.length})` : upcoming.first.patientName}
+                    </span>
+                    <span className="block text-[11px] text-[#64748B]">
+                      {upcoming.first.startTime} • em {toMin(upcoming.first.startTime) - nowMin} min • {upcoming.first.professionalName}
+                    </span>
+                  </span>
+                </button>
+              ) : (
+                <p className="text-xs text-[#64748B]">{dayStr === todayStr ? 'Nenhum atendimento pendente hoje.' : 'Disponível apenas para o dia de hoje.'}</p>
+              )}
+            </Card>
+            <Card title="Equipe no dia">
+              {team.length === 0 ? (
+                <p className="text-xs text-[#64748B]">Sem atendimentos neste dia.</p>
+              ) : (
+                <ul className="space-y-3">
+                  {team.map((t) => (
+                    <li key={t.id} className="flex items-center gap-2.5">
+                      <Avatar name={t.name.replace(/^(Dra?\.|Prof\.)\s*/i, '')} size="sm" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-semibold truncate">{t.name}</p>
+                        <p className="text-[11px] text-[#64748B]">
+                          {t.from} – {t.to} • {t.count} horário(s) • {t.students} aluno(s)
+                        </p>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Card>
+          </aside>
+        </div>
+      )}
+
+      {/* WEEK VIEW */}
+      {viewMode === 'week' && (
+        <div className="bg-white dark:bg-[#17231D] border border-[#E5EAE7] dark:border-[#273830] rounded-xl overflow-x-auto shadow-xs">
+          <div className="min-w-[860px]">
+            {(() => {
+              const weekDays = Array.from({ length: 6 }).map((_, i) => addDays(weekStart, i)); // Mon–Sat
+              return (
+                <>
+                  <div className="grid grid-cols-[4rem_repeat(6,minmax(0,1fr))] border-b border-[#E5EAE7] dark:border-[#273830] bg-[#F8FAF9]/80 dark:bg-[#111A15] sticky top-0 z-[1]">
+                    <div className="p-3" />
+                    {weekDays.map((day) => {
+                      const isToday = isSameDay(day, new Date());
+                      const dStr = format(day, 'yyyy-MM-dd');
+                      const count = filteredAppointments.filter((a) => a.date === dStr && isActive(a)).length;
+                      return (
+                        <button
+                          key={dStr}
+                          onClick={() => {
+                            setSelectedDate(day);
+                            setViewMode('day');
+                          }}
+                          className={`p-2.5 text-center border-l border-[#E5EAE7] dark:border-[#273830] hover:bg-[#E9F1EC]/60 dark:hover:bg-[#1F332A]/60 ${
+                            isToday ? 'bg-[#E9F1EC] dark:bg-[#1F332A]' : ''
+                          }`}
+                        >
+                          <p className="text-[11px] uppercase font-bold text-[#64748B]">{format(day, 'EEE', { locale: ptBR })}</p>
+                          <p className={`text-lg font-extrabold leading-tight ${isToday ? 'text-[#426B5B] dark:text-[#7FB39F]' : ''}`}>{format(day, 'dd')}</p>
+                          <p className="text-[10px] text-[#64748B]">{count ? `${count} sessão(ões)` : 'livre'}</p>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="divide-y divide-[#E5EAE7] dark:divide-[#273830]">
+                    {timeSlots.map((time) => {
+                      const h = parseInt(time, 10);
+                      return (
+                        <div key={time} className="grid grid-cols-[4rem_repeat(6,minmax(0,1fr))] min-h-[60px]">
+                          <div className="p-2 text-right font-mono text-[11px] text-[#64748B]">{time}</div>
+                          {weekDays.map((day) => {
+                            const dStr = format(day, 'yyyy-MM-dd');
+                            const isToday = dStr === todayStr;
+                            const nowHere = isToday && Math.floor(nowMin / 60) === h;
+                            const cellBlocks = toBlocks(filteredAppointments.filter((a) => a.date === dStr && a.startTime.startsWith(time.slice(0, 2))));
+                            return (
+                              <div
+                                key={dStr}
+                                onClick={() => cellBlocks.length === 0 && handleOpenNewModal(dStr, time)}
+                                className={`relative p-1 border-l border-[#E5EAE7] dark:border-[#273830] cursor-pointer group ${
+                                  isToday ? 'bg-[#E9F1EC]/30 dark:bg-[#1F332A]/30' : ''
+                                } hover:bg-[#F8FAF9] dark:hover:bg-[#111A15]/60`}
+                              >
+                                {nowHere && (
+                                  <span
+                                    className="absolute left-0 right-0 h-0.5 bg-rose-500 z-[1] pointer-events-none"
+                                    style={{ top: `${((nowMin % 60) / 60) * 100}%` }}
+                                    aria-label="Agora"
+                                  />
+                                )}
+                                {cellBlocks.map((b) => renderMiniBlock(b))}
+                                {cellBlocks.length === 0 && (
+                                  <span className="hidden group-hover:flex items-center justify-center h-full text-[#94A3B8]">
+                                    <Plus className="w-4 h-4" />
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              );
+            })()}
           </div>
         </div>
       )}
 
       {/* MONTH VIEW */}
       {viewMode === 'month' && (
-        <div className="bg-white dark:bg-[#17231D] border border-[#E5EAE7] dark:border-[#273830] rounded-xl p-4 shadow-xs">
+        <div className="bg-white dark:bg-[#17231D] border border-[#E5EAE7] dark:border-[#273830] rounded-xl p-2 sm:p-4 shadow-xs">
           {(() => {
             const start = startOfWeek(startOfMonth(selectedDate), { weekStartsOn: 1 });
             const end = endOfWeek(endOfMonth(selectedDate), { weekStartsOn: 1 });
             const monthDays = eachDayOfInterval({ start, end });
-
             return (
               <div className="grid grid-cols-7 gap-1">
                 {['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'].map((d) => (
-                  <div key={d} className="p-2 text-center text-xs font-bold text-[#64748B]">
+                  <div key={d} className="p-2 text-center text-[11px] font-bold uppercase text-[#64748B]">
                     {d}
                   </div>
                 ))}
                 {monthDays.map((day) => {
-                  const dayStr = format(day, 'yyyy-MM-dd');
-                  const dayAppts = filteredAppointments.filter((a) => a.date === dayStr);
+                  const dStr = format(day, 'yyyy-MM-dd');
+                  const list = filteredAppointments.filter((a) => a.date === dStr);
+                  const blocks = toBlocks(list);
+                  const active = list.filter(isActive).length;
                   const isCurrentMonth = day.getMonth() === selectedDate.getMonth();
                   const isToday = isSameDay(day, new Date());
-
                   return (
-                    <div
-                      key={dayStr}
+                    <button
+                      key={dStr}
                       onClick={() => {
                         setSelectedDate(day);
                         setViewMode('day');
                       }}
-                      className={`min-h-[85px] p-2 border border-[#E5EAE7] dark:border-[#273830] rounded-lg transition-colors cursor-pointer ${
-                        !isCurrentMonth ? 'opacity-40 bg-slate-50 dark:bg-slate-900/40' : 'bg-white dark:bg-[#17231D]'
-                      } ${isToday ? 'border-[#426B5B] ring-1 ring-[#426B5B]' : ''}`}
+                      className={`min-h-[64px] sm:min-h-[96px] p-1 sm:p-1.5 text-left border rounded-lg transition-colors hover:border-[#426B5B] ${
+                        !isCurrentMonth ? 'opacity-40' : ''
+                      } ${isToday ? 'border-[#426B5B] ring-1 ring-[#426B5B] bg-[#E9F1EC]/40 dark:bg-[#1F332A]/40' : 'border-[#E5EAE7] dark:border-[#273830]'}`}
                     >
                       <div className="flex items-center justify-between">
-                        <span className={`text-xs font-bold ${isToday ? 'text-[#426B5B]' : ''}`}>
-                          {format(day, 'd')}
-                        </span>
-                        {dayAppts.length > 0 && (
-                          <span className="text-[10px] font-bold bg-[#E9F1EC] dark:bg-[#1F332A] text-[#426B5B] px-1.5 rounded-full">
-                            {dayAppts.length}
-                          </span>
-                        )}
+                        <span className={`text-xs font-bold ${isToday ? 'text-[#426B5B] dark:text-[#7FB39F]' : ''}`}>{format(day, 'd')}</span>
+                        {active > 0 && <span className="text-[10px] font-bold text-[#64748B]">{active}</span>}
                       </div>
-
-                      <div className="mt-1 space-y-1 overflow-hidden">
-                        {dayAppts.slice(0, 2).map((a) => (
-                          <div
-                            key={a.id}
-                            className="text-[10px] truncate px-1 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300"
-                          >
-                            {a.startTime} {a.patientName.split(' ')[0]}
-                          </div>
+                      {/* phones: status dots; larger screens: first bookings */}
+                      <div className="sm:hidden mt-1 flex flex-wrap gap-0.5">
+                        {list.slice(0, 6).map((a) => (
+                          <span key={a.id} className={`w-1.5 h-1.5 rounded-full ${st(a.status).dot}`} />
                         ))}
-                        {dayAppts.length > 2 && (
-                          <span className="text-[9px] text-[#64748B] block">
-                            +{dayAppts.length - 2} mais
-                          </span>
-                        )}
                       </div>
-                    </div>
+                      <div className="hidden sm:block mt-1">
+                        {blocks.slice(0, 2).map((b) => renderMiniBlock(b, true))}
+                        {blocks.length > 2 && <span className="text-[10px] text-[#64748B]">+{blocks.length - 2} horário(s)</span>}
+                      </div>
+                    </button>
                   );
                 })}
               </div>
@@ -1193,7 +1426,7 @@ export const ScheduleView: React.FC<ScheduleViewProps> = ({ onNavigate, initialA
                       .filter((p) => !formPatientIds.includes(p.id) && !formClass.students.some((s) => s.patientId === p.id))
                       .map((p) => (
                         <option key={p.id} value={p.id}>
-                          {p.name} ({p.sessionsRemaining} sessões restantes)
+                          {p.name} ({p.sessionsRemaining} {p.sessionsRemaining === 1 ? 'sessão restante' : 'sessões restantes'})
                         </option>
                       ))}
                   </select>
@@ -1226,7 +1459,7 @@ export const ScheduleView: React.FC<ScheduleViewProps> = ({ onNavigate, initialA
                 >
                   {patients.map((p) => (
                     <option key={p.id} value={p.id}>
-                      {p.name} ({p.sessionsRemaining} sessões restantes)
+                      {p.name} ({p.sessionsRemaining} {p.sessionsRemaining === 1 ? 'sessão restante' : 'sessões restantes'})
                     </option>
                   ))}
                 </select>
