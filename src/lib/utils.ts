@@ -72,6 +72,7 @@ export const SECTION_ROLES: Record<string, UserRole[] | undefined> = {
   professionals: ['admin'],
   settings: ['admin'],
   records: ['admin', 'professional'],
+  evaluations: ['admin', 'professional'],
 };
 
 export function canAccessSection(section: string, role: UserRole): boolean {

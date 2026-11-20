@@ -16,6 +16,9 @@ import {
   AttendanceRecord,
   ClinicalEvolutionEntry,
   ServiceArea,
+  PresenceSheet,
+  EvaluationTemplate,
+  EvaluationRecord,
 } from '../types';
 import {
   INITIAL_PATIENTS,
@@ -32,6 +35,7 @@ import {
   DEFAULT_SERVICE_AREAS,
 } from './constants';
 import { withExerciseMedia } from './exerciseMedia';
+import { buildDefaultTemplate } from './evaluation';
 import { toLocalDateKey, nowStamp, formatCurrency, setGroupModalities } from './utils';
 
 const STORAGE_KEYS = {
@@ -49,6 +53,9 @@ const STORAGE_KEYS = {
   ACTIVE_ATTENDANCE: 'pilatesflow_active_attendance',
   BIRTHDAY_POPUP_DISMISSED: 'pilatesflow_bday_dismissed_date',
   ATTENDANCES: 'pilatesflow_attendances',
+  PRESENCE: 'pilatesflow_presence',
+  EVALUATION_TEMPLATES: 'pilatesflow_evaluation_templates',
+  EVALUATIONS: 'pilatesflow_evaluations',
 };
 
 /** Clinic data shared between devices/users (sync + backup). Per-device state is left out. */
@@ -64,6 +71,9 @@ export const SYNCED_KEYS = [
   STORAGE_KEYS.CLINICAL_RECORDS,
   STORAGE_KEYS.SETTINGS,
   STORAGE_KEYS.ATTENDANCES,
+  STORAGE_KEYS.PRESENCE,
+  STORAGE_KEYS.EVALUATION_TEMPLATES,
+  STORAGE_KEYS.EVALUATIONS,
 ];
 
 const BACKUP_APP_ID = 'pilatesflow-backup';
@@ -151,6 +161,9 @@ export const clinicStorage = {
     setItem(STORAGE_KEYS.CLINICAL_RECORDS, INITIAL_CLINICAL_RECORDS);
     setItem(STORAGE_KEYS.SETTINGS, DEFAULT_SETTINGS);
     setItem(STORAGE_KEYS.ATTENDANCES, INITIAL_ATTENDANCES);
+    setItem(STORAGE_KEYS.PRESENCE, []);
+    setItem(STORAGE_KEYS.EVALUATION_TEMPLATES, []);
+    setItem(STORAGE_KEYS.EVALUATIONS, []);
     localStorage.removeItem(STORAGE_KEYS.BIRTHDAY_POPUP_DISMISSED);
     notify();
   },
@@ -358,6 +371,49 @@ export const clinicStorage = {
 
   deletePlan(id: string): void {
     setItem(STORAGE_KEYS.PLANS, this.getPlans().filter((p) => p.id !== id));
+  },
+
+  // PRESENCE (Controle de Presença)
+  getPresenceSheet(patientId: string): PresenceSheet {
+    const sheets = getItem<PresenceSheet[]>(STORAGE_KEYS.PRESENCE, []);
+    return sheets.find((s) => s.patientId === patientId) || { patientId, manualEntries: [], notes: {} };
+  },
+
+  savePresenceSheet(sheet: PresenceSheet): void {
+    const sheets = getItem<PresenceSheet[]>(STORAGE_KEYS.PRESENCE, []).filter((s) => s.patientId !== sheet.patientId);
+    setItem(STORAGE_KEYS.PRESENCE, [...sheets, { ...sheet, updatedAt: nowStamp() }]);
+  },
+
+  // EVALUATIONS (fichas de avaliação)
+  getEvaluationTemplates(): EvaluationTemplate[] {
+    const stored = getItem<EvaluationTemplate[]>(STORAGE_KEYS.EVALUATION_TEMPLATES, []);
+    return stored.length ? stored : [buildDefaultTemplate()];
+  },
+
+  saveEvaluationTemplate(tpl: EvaluationTemplate): boolean {
+    const list = this.getEvaluationTemplates().filter((t) => t.id !== tpl.id);
+    return setItem(STORAGE_KEYS.EVALUATION_TEMPLATES, [...list, { ...tpl, updatedAt: new Date().toISOString() }]);
+  },
+
+  deleteEvaluationTemplate(id: string): void {
+    setItem(
+      STORAGE_KEYS.EVALUATION_TEMPLATES,
+      this.getEvaluationTemplates().filter((t) => t.id !== id)
+    );
+  },
+
+  getEvaluations(patientId?: string): EvaluationRecord[] {
+    const all = getItem<EvaluationRecord[]>(STORAGE_KEYS.EVALUATIONS, []);
+    return (patientId ? all.filter((e) => e.patientId === patientId) : all).sort((a, b) => b.date.localeCompare(a.date));
+  },
+
+  saveEvaluation(rec: EvaluationRecord): boolean {
+    const list = getItem<EvaluationRecord[]>(STORAGE_KEYS.EVALUATIONS, []).filter((e) => e.id !== rec.id);
+    return setItem(STORAGE_KEYS.EVALUATIONS, [...list, { ...rec, updatedAt: new Date().toISOString() }]);
+  },
+
+  deleteEvaluation(id: string): void {
+    setItem(STORAGE_KEYS.EVALUATIONS, getItem<EvaluationRecord[]>(STORAGE_KEYS.EVALUATIONS, []).filter((e) => e.id !== id));
   },
 
   // APPOINTMENTS

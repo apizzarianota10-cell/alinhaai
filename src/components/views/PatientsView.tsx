@@ -22,6 +22,7 @@ import {
   ArrowLeft,
   MessageCircle,
   Smartphone,
+  CalendarCheck2,
 } from 'lucide-react';
 import { clinicStorage } from '../../lib/storage';
 import {
@@ -39,6 +40,8 @@ import { buildPortalLink } from '../../lib/portal';
 import { format } from 'date-fns';
 import { Patient, Appointment, Charge, WorkoutPlan, ClinicalRecord, Plan } from '../../types';
 import { Modal } from '../common/Modal';
+import { PresenceSheetPanel } from './PresenceView';
+import { EvaluationsPanel } from './EvaluationsView';
 import { PainChart } from '../common/PainChart';
 import { useToast } from '../common/Toast';
 
@@ -65,7 +68,7 @@ export const PatientsView: React.FC<PatientsViewProps> = ({
   const activePatient = patients.find((p) => p.id === activePatientId) || null;
   const setActivePatient = (p: Patient | null) => setActivePatientId(p ? p.id : null);
   const [profileTab, setProfileTab] = useState<
-    'resumo' | 'agenda' | 'plano' | 'pagamentos' | 'avaliacao' | 'fichas' | 'evolucao' | 'historico' | 'documentos'
+    'resumo' | 'agenda' | 'plano' | 'pagamentos' | 'avaliacao' | 'fichas' | 'evolucao' | 'historico' | 'documentos' | 'presenca'
   >('resumo');
 
   // Modal states
@@ -563,6 +566,7 @@ export const PatientsView: React.FC<PatientsViewProps> = ({
               { id: 'evolucao', label: '7. Evolução', icon: Activity },
               { id: 'historico', label: '8. Histórico', icon: Clock },
               { id: 'documentos', label: '9. Documentos', icon: FolderOpen },
+              { id: 'presenca', label: '10. Presença', icon: CalendarCheck2 },
             ]
               // LGPD: clinical data only for clinical roles, payments only for roles with finance access
               .filter((tab) => {
@@ -759,8 +763,14 @@ export const PatientsView: React.FC<PatientsViewProps> = ({
                   </div>
                 );
               })()}
+              <div className="pt-4 border-t border-[#E5EAE7] dark:border-[#273830]">
+                <EvaluationsPanel patient={activePatient} />
+              </div>
             </div>
           )}
+
+          {/* TAB 10: CONTROLE DE PRESENÇA */}
+          {profileTab === 'presenca' && <PresenceSheetPanel patient={activePatient} compact />}
 
           {/* TAB 6: FICHAS DE EXERCICIOS */}
           {profileTab === 'fichas' && (

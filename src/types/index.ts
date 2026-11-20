@@ -393,3 +393,85 @@ export interface ServiceArea {
   defaultCapacity?: number;
   active: boolean;
 }
+
+// ───────────────────────── Controle de Presença ─────────────────────────
+
+/** P = presença, C = compensação (reposição), F = falta */
+export type PresenceMark = 'P' | 'C' | 'F';
+
+/** Paper-style entry added by hand (sessions that are not in the agenda) */
+export interface ManualPresenceEntry {
+  id: string;
+  date: string; // YYYY-MM-DD
+  mark: PresenceMark;
+  note?: string;
+}
+
+/** Per-patient attendance sheet: manual entries and the notes written every 10 sessions */
+export interface PresenceSheet {
+  patientId: string;
+  manualEntries: ManualPresenceEntry[];
+  /**
+   * Free-text notes keyed by position: `c{cycle}-b{block}` = "Percepção do paciente" after each
+   * 10 sessions, `c{cycle}-reav` = reavaliação after 30 sessions.
+   */
+  notes: Record<string, string>;
+  updatedAt?: string;
+}
+
+// ───────────────────────── Avaliação ─────────────────────────
+
+export type EvaluationFieldType =
+  | 'text' // short answer
+  | 'textarea' // long answer
+  | 'number'
+  | 'date'
+  | 'yesno' // Sim / Não (+ optional detail)
+  | 'select' // one of the options
+  | 'scale' // movement score (feeds the suggested level)
+  | 'pain'; // 0-10 (EVA)
+
+export interface EvaluationField {
+  id: string;
+  label: string;
+  type: EvaluationFieldType;
+  options?: string[];
+  unit?: string;
+  /** yes/no questions that ask "Qual?" / "Locais:" when the answer is yes */
+  detailLabel?: string;
+}
+
+export interface EvaluationSection {
+  id: string;
+  title: string;
+  fields: EvaluationField[];
+}
+
+export interface EvaluationTemplate {
+  id: string;
+  name: string;
+  sections: EvaluationSection[];
+  /** Name of the PDF the template was imported from */
+  sourceFileName?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** A filled-in evaluation. The template is copied so later template edits don't change old records */
+export interface EvaluationRecord {
+  id: string;
+  patientId: string;
+  patientName: string;
+  templateId: string;
+  templateName: string;
+  sections: EvaluationSection[];
+  /** field id -> answer ("Sim"/"Não" for yesno, number as string for scale/pain) */
+  values: Record<string, string>;
+  /** detail answer of yes/no fields, keyed by field id */
+  details?: Record<string, string>;
+  date: string; // YYYY-MM-DD
+  professionalId: string;
+  professionalName: string;
+  createdAt: string;
+  updatedAt: string;
+}

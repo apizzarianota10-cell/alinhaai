@@ -1,0 +1,904 @@
+import React, { useEffect, useMemo, useState } from 'react';
+import {
+  ClipboardCheck,
+  FileUp,
+  Plus,
+  Trash2,
+  ChevronUp,
+  ChevronDown,
+  Copy,
+  Pencil,
+  Printer,
+  X,
+  Eye,
+  FileText,
+  Loader2,
+  Search,
+  CheckCircle2,
+} from 'lucide-react';
+import { clinicStorage } from '../../lib/storage';
+import { formatDate, printElement } from '../../lib/utils';
+import {
+  buildDefaultTemplate,
+  cloneSections,
+  computeMovementLevel,
+  FIELD_TYPE_LABELS,
+  formatAnswer,
+  newId,
+  renderPdfPages,
+  SCALE_OPTIONS,
+  templateFromPdf,
+} from '../../lib/evaluation';
+import { LEVEL_LABEL } from '../../lib/pilatesCatalog';
+import {
+  EvaluationField,
+  EvaluationFieldType,
+  EvaluationRecord,
+  EvaluationSection,
+  EvaluationTemplate,
+  Patient,
+} from '../../types';
+import { Modal } from '../common/Modal';
+import { useToast } from '../common/Toast';
+
+const input =
+  'w-full text-sm px-3 py-2 bg-[#F8FAF9] dark:bg-[#111A15] border border-[#E5EAE7] dark:border-[#273830] rounded-lg';
+const btn =
+  'flex items-center justify-center gap-1 px-3 py-2 text-xs font-semibold rounded-lg border border-[#E5EAE7] dark:border-[#273830] bg-white dark:bg-[#17231D] hover:bg-[#F8FAF9] dark:hover:bg-[#1F332A]';
+const btnPrimary = 'flex items-center justify-center gap-1 px-3 py-2 text-xs font-semibold rounded-lg text-white bg-[#426B5B] hover:bg-[#345648]';
+const iconBtn = 'p-2 rounded-lg text-[#64748B] hover:bg-[#F1F5F3] dark:hover:bg-[#1F332A] disabled:opacity-30';
+
+const move = <T,>(list: T[], i: number, dir: -1 | 1): T[] => {
+  const j = i + dir;
+  if (j < 0 || j >= list.length) return list;
+  const next = [...list];
+  [next[i], next[j]] = [next[j], next[i]];
+  return next;
+};
+
+/** Full-screen layer (more room than a modal for long forms; safe-area aware on phones) */
+const Sheet: React.FC<{ title: string; onClose: () => void; actions?: React.ReactNode; children: React.ReactNode }> = ({
+  title,
+  onClose,
+  actions,
+  children,
+}) => (
+  <div className="fixed inset-0 z-50 bg-[#F6F8F7] dark:bg-[#0C130F] flex flex-col" role="dialog" aria-label={title}>
+    <div
+      className="flex items-center gap-2 px-3 sm:px-5 py-3 border-b border-[#E5EAE7] dark:border-[#263730] bg-white dark:bg-[#141F19]"
+      style={{ paddingTop: 'max(0.75rem, env(safe-area-inset-top))' }}
+    >
+      <button onClick={onClose} className={iconBtn} aria-label="Fechar">
+        <X className="w-5 h-5" />
+      </button>
+      <h2 className="flex-1 min-w-0 truncate font-bold text-sm sm:text-base">{title}</h2>
+      <div className="flex items-center gap-2">{actions}</div>
+    </div>
+    <div className="flex-1 overflow-hidden">{children}</div>
+  </div>
+);
+
+// ───────────────────────── Template editor (add / remove / reorder items) ─────────────────────────
+
+const TemplateEditor: React.FC<{
+  initial: EvaluationTemplate;
+  pdfPages?: string[];
+  onClose: () => void;
+}> = ({ initial, pdfPages, onClose }) => {
+  const { showToast } = useToast();
+  const [tpl, setTpl] = useState<EvaluationTemplate>(initial);
+  const [mobilePane, setMobilePane] = useState<'edit' | 'pdf'>('edit');
+  const [checked, setChecked] = useState(!pdfPages);
+  const fieldCount = tpl.sections.reduce((n, s) => n + s.fields.length, 0);
+
+  const setSections = (sections: EvaluationSection[]) => setTpl({ ...tpl, sections });
+  const updateSection = (id: string, patch: Partial<EvaluationSection>) =>
+    setSections(tpl.sections.map((s) => (s.id === id ? { ...s, ...patch } : s)));
+  const updateField = (secId: string, fieldId: string, patch: Partial<EvaluationField>) =>
+    setSections(
+      tpl.sections.map((s) =>
+        s.id === secId ? { ...s, fields: s.fields.map((f) => (f.id === fieldId ? { ...f, ...patch } : f)) } : s
+      )
+    );
+
+  const handleSave = () => {
+    if (!tpl.name.trim()) return showToast('Dê um nome à ficha.', 'error');
+    if (fieldCount === 0) return showToast('Adicione pelo menos um item.', 'error');
+    if (pdfPages && !checked) return showToast('Confira o modelo com o PDF e marque a confirmação.', 'error');
+    const cleaned: EvaluationTemplate = {
+      ...tpl,
+      name: tpl.name.trim(),
+      sections: tpl.sections
+        .map((s) => ({ ...s, title: s.title.trim() || 'Sem título', fields: s.fields.filter((f) => f.label.trim()) }))
+        .filter((s) => s.fields.length > 0),
+    };
+    if (!clinicStorage.saveEvaluationTemplate(cleaned)) return showToast('Não foi possível salvar (armazenamento cheio).', 'error');
+    showToast('Modelo de ficha salvo!', 'success');
+    onClose();
+  };
+
+  const editor = (
+    <div className="space-y-4 max-w-3xl mx-auto">
+      <div>
+        <label className="block text-xs font-semibold mb-1">Nome da ficha</label>
+        <input value={tpl.name} onChange={(e) => setTpl({ ...tpl, name: e.target.value })} className={`${input} font-semibold`} />
+        <p className="text-[11px] text-[#64748B] mt-1">
+          {tpl.sections.length} seções • {fieldCount} itens{tpl.sourceFileName ? ` • importado de “${tpl.sourceFileName}”` : ''}
+        </p>
+      </div>
+
+      {tpl.sections.map((sec, si) => (
+        <section key={sec.id} className="rounded-xl border border-[#E5EAE7] dark:border-[#273830] bg-white dark:bg-[#17231D]">
+          <div className="flex items-center gap-1 p-2 border-b border-[#E5EAE7] dark:border-[#273830]">
+            <input
+              value={sec.title}
+              onChange={(e) => updateSection(sec.id, { title: e.target.value })}
+              aria-label="Título da seção"
+              className="flex-1 min-w-0 px-2 py-1.5 text-sm font-bold bg-transparent rounded-md focus:bg-[#F8FAF9] dark:focus:bg-[#111A15]"
+            />
+            <button className={iconBtn} disabled={si === 0} onClick={() => setSections(move(tpl.sections, si, -1))} aria-label="Subir seção">
+              <ChevronUp className="w-4 h-4" />
+            </button>
+            <button className={iconBtn} disabled={si === tpl.sections.length - 1} onClick={() => setSections(move(tpl.sections, si, 1))} aria-label="Descer seção">
+              <ChevronDown className="w-4 h-4" />
+            </button>
+            <button
+              className={`${iconBtn} hover:text-rose-600`}
+              onClick={() => setSections(tpl.sections.filter((s) => s.id !== sec.id))}
+              aria-label={`Apagar seção ${sec.title}`}
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
+          </div>
+
+          <ul className="divide-y divide-[#E5EAE7] dark:divide-[#273830]">
+            {sec.fields.map((fl, fi) => (
+              <li key={fl.id} className="p-2 space-y-2">
+                <div className="flex flex-wrap sm:flex-nowrap items-center gap-1.5">
+                  <input
+                    value={fl.label}
+                    onChange={(e) => updateField(sec.id, fl.id, { label: e.target.value })}
+                    placeholder="Nome do item"
+                    aria-label="Nome do item"
+                    className="flex-1 min-w-[10rem] px-2 py-1.5 text-sm bg-[#F8FAF9] dark:bg-[#111A15] border border-[#E5EAE7] dark:border-[#273830] rounded-md"
+                  />
+                  <div className="flex items-center gap-1 w-full sm:w-auto">
+                  <select
+                    value={fl.type}
+                    onChange={(e) => {
+                      const type = e.target.value as EvaluationFieldType;
+                      updateField(sec.id, fl.id, {
+                        type,
+                        options: type === 'select' ? fl.options || ['Opção 1', 'Opção 2'] : fl.options,
+                      });
+                    }}
+                    aria-label="Tipo de resposta"
+                    className="flex-1 min-w-0 sm:flex-none sm:w-44 px-2 py-1.5 text-xs bg-[#F8FAF9] dark:bg-[#111A15] border border-[#E5EAE7] dark:border-[#273830] rounded-md"
+                  >
+                    {(Object.keys(FIELD_TYPE_LABELS) as EvaluationFieldType[]).map((t) => (
+                      <option key={t} value={t}>
+                        {FIELD_TYPE_LABELS[t]}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="flex shrink-0">
+                    <button className={iconBtn} disabled={fi === 0} onClick={() => updateSection(sec.id, { fields: move(sec.fields, fi, -1) })} aria-label="Subir item">
+                      <ChevronUp className="w-4 h-4" />
+                    </button>
+                    <button
+                      className={iconBtn}
+                      disabled={fi === sec.fields.length - 1}
+                      onClick={() => updateSection(sec.id, { fields: move(sec.fields, fi, 1) })}
+                      aria-label="Descer item"
+                    >
+                      <ChevronDown className="w-4 h-4" />
+                    </button>
+                    <button
+                      className={`${iconBtn} hover:text-rose-600`}
+                      onClick={() => updateSection(sec.id, { fields: sec.fields.filter((f) => f.id !== fl.id) })}
+                      aria-label={`Apagar item ${fl.label}`}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                  </div>
+                </div>
+                {fl.type === 'select' && (
+                  <input
+                    value={(fl.options || []).join(', ')}
+                    onChange={(e) => updateField(sec.id, fl.id, { options: e.target.value.split(',').map((o) => o.trim()) })}
+                    onBlur={(e) => updateField(sec.id, fl.id, { options: e.target.value.split(',').map((o) => o.trim()).filter(Boolean) })}
+                    placeholder="Opções separadas por vírgula"
+                    aria-label="Opções"
+                    className="w-full px-2 py-1.5 text-xs bg-[#F8FAF9] dark:bg-[#111A15] border border-dashed border-[#E5EAE7] dark:border-[#273830] rounded-md"
+                  />
+                )}
+                {fl.type === 'number' && (
+                  <input
+                    value={fl.unit || ''}
+                    onChange={(e) => updateField(sec.id, fl.id, { unit: e.target.value || undefined })}
+                    placeholder="Unidade (ex.: cm, kg)"
+                    aria-label="Unidade"
+                    className="w-40 px-2 py-1.5 text-xs bg-[#F8FAF9] dark:bg-[#111A15] border border-dashed border-[#E5EAE7] dark:border-[#273830] rounded-md"
+                  />
+                )}
+                {fl.type === 'yesno' && (
+                  <input
+                    value={fl.detailLabel || ''}
+                    onChange={(e) => updateField(sec.id, fl.id, { detailLabel: e.target.value || undefined })}
+                    placeholder="Pergunta complementar se Sim (ex.: Qual?)"
+                    aria-label="Pergunta complementar"
+                    className="w-full sm:w-72 px-2 py-1.5 text-xs bg-[#F8FAF9] dark:bg-[#111A15] border border-dashed border-[#E5EAE7] dark:border-[#273830] rounded-md"
+                  />
+                )}
+              </li>
+            ))}
+          </ul>
+          <div className="p-2">
+            <button
+              onClick={() => updateSection(sec.id, { fields: [...sec.fields, { id: newId('fld'), label: '', type: 'text' }] })}
+              className="w-full flex items-center justify-center gap-1 py-2 text-xs font-semibold text-[#426B5B] dark:text-[#7FB39F] border border-dashed border-[#426B5B]/40 rounded-lg hover:bg-[#E9F1EC] dark:hover:bg-[#1F332A]"
+            >
+              <Plus className="w-3.5 h-3.5" /> Adicionar item
+            </button>
+          </div>
+        </section>
+      ))}
+
+      <button
+        onClick={() => setSections([...tpl.sections, { id: newId('sec'), title: 'Nova seção', fields: [{ id: newId('fld'), label: '', type: 'text' }] }])}
+        className={`${btn} w-full py-3`}
+      >
+        <Plus className="w-4 h-4" /> Adicionar seção
+      </button>
+
+      {pdfPages && (
+        <label className="flex items-start gap-2 p-3 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 text-xs cursor-pointer">
+          <input type="checkbox" checked={checked} onChange={(e) => setChecked(e.target.checked)} className="mt-0.5 w-4 h-4" />
+          <span>
+            Conferi o modelo com o PDF original: as seções e os itens batem (ajustei o que faltou ou sobrou).
+          </span>
+        </label>
+      )}
+      <div className="h-6" />
+    </div>
+  );
+
+  return (
+    <Sheet
+      title={pdfPages ? 'Conferir ficha importada' : 'Editar modelo de ficha'}
+      onClose={onClose}
+      actions={
+        <button onClick={handleSave} className={btnPrimary}>
+          <CheckCircle2 className="w-4 h-4" /> Salvar
+        </button>
+      }
+    >
+      {pdfPages ? (
+        <div className="h-full flex flex-col">
+          {/* phones: switch between the template and the PDF */}
+          <div className="lg:hidden grid grid-cols-2 gap-1 p-2 bg-white dark:bg-[#141F19] border-b border-[#E5EAE7] dark:border-[#263730]">
+            {(['edit', 'pdf'] as const).map((p) => (
+              <button
+                key={p}
+                onClick={() => setMobilePane(p)}
+                className={`py-2 rounded-lg text-xs font-semibold ${mobilePane === p ? 'bg-[#426B5B] text-white' : 'text-[#64748B]'}`}
+              >
+                {p === 'edit' ? `Modelo (${fieldCount} itens)` : `PDF original (${pdfPages.length} pág.)`}
+              </button>
+            ))}
+          </div>
+          <div className="flex-1 grid lg:grid-cols-2 overflow-hidden">
+            <div className={`overflow-y-auto p-3 sm:p-5 ${mobilePane === 'edit' ? '' : 'hidden lg:block'}`}>{editor}</div>
+            <div className={`overflow-y-auto p-3 sm:p-5 bg-[#E9EFEC] dark:bg-[#111A15] space-y-3 ${mobilePane === 'pdf' ? '' : 'hidden lg:block'}`}>
+              {pdfPages.map((src, i) => (
+                <img key={i} src={src} alt={`Página ${i + 1} do PDF`} className="w-full rounded-lg shadow bg-white" />
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="h-full overflow-y-auto p-3 sm:p-5">{editor}</div>
+      )}
+    </Sheet>
+  );
+};
+
+// ───────────────────────── Filling an evaluation ─────────────────────────
+
+const FieldInput: React.FC<{
+  field: EvaluationField;
+  value: string;
+  detail: string;
+  onChange: (v: string) => void;
+  onDetail: (v: string) => void;
+}> = ({ field, value, detail, onChange, onDetail }) => {
+  const id = `ev-${field.id}`;
+  const chip = (active: boolean) =>
+    `px-3 py-2 rounded-lg border text-xs font-semibold ${
+      active ? 'bg-[#426B5B] border-[#426B5B] text-white' : 'border-[#E5EAE7] dark:border-[#273830] text-[#64748B] dark:text-[#9AA8B6]'
+    }`;
+  return (
+    <div className={field.type === 'textarea' || field.type === 'scale' ? 'sm:col-span-2' : ''}>
+      <label htmlFor={id} className="block text-xs font-semibold mb-1">
+        {field.label}
+      </label>
+      {field.type === 'textarea' && <textarea id={id} rows={3} value={value} onChange={(e) => onChange(e.target.value)} className={input} />}
+      {field.type === 'text' && <input id={id} value={value} onChange={(e) => onChange(e.target.value)} className={input} />}
+      {field.type === 'date' && <input id={id} type="date" value={value} onChange={(e) => onChange(e.target.value)} className={input} />}
+      {field.type === 'number' && (
+        <div className="flex items-center gap-2">
+          <input id={id} type="number" inputMode="decimal" step="any" value={value} onChange={(e) => onChange(e.target.value)} className={input} />
+          {field.unit && <span className="text-xs text-[#64748B]">{field.unit}</span>}
+        </div>
+      )}
+      {field.type === 'select' && (
+        <select id={id} value={value} onChange={(e) => onChange(e.target.value)} className={input}>
+          <option value="">—</option>
+          {(field.options || []).map((o) => (
+            <option key={o} value={o}>
+              {o}
+            </option>
+          ))}
+        </select>
+      )}
+      {field.type === 'yesno' && (
+        <div className="space-y-2">
+          <div className="flex gap-2" role="radiogroup" aria-labelledby={id}>
+            {['Sim', 'Não'].map((o) => (
+              <button key={o} type="button" role="radio" aria-checked={value === o} onClick={() => onChange(value === o ? '' : o)} className={chip(value === o)}>
+                {o}
+              </button>
+            ))}
+          </div>
+          {value === 'Sim' && field.detailLabel && (
+            <input value={detail} onChange={(e) => onDetail(e.target.value)} placeholder={field.detailLabel} aria-label={field.detailLabel} className={input} />
+          )}
+        </div>
+      )}
+      {field.type === 'scale' && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5" role="radiogroup" aria-label={field.label}>
+          {SCALE_OPTIONS.map((o) => (
+            <button key={o.value} type="button" role="radio" aria-checked={value === o.value} onClick={() => onChange(value === o.value ? '' : o.value)} className={chip(value === o.value)}>
+              {o.label}
+            </button>
+          ))}
+        </div>
+      )}
+      {field.type === 'pain' && (
+        <div className="flex flex-wrap gap-1" role="radiogroup" aria-label={field.label}>
+          {Array.from({ length: 11 }, (_, n) => String(n)).map((n) => (
+            <button
+              key={n}
+              type="button"
+              role="radio"
+              aria-checked={value === n}
+              onClick={() => onChange(value === n ? '' : n)}
+              className={`w-9 h-9 rounded-lg border text-xs font-bold ${
+                value === n
+                  ? Number(n) >= 7
+                    ? 'bg-rose-600 border-rose-600 text-white'
+                    : Number(n) >= 4
+                    ? 'bg-amber-500 border-amber-500 text-white'
+                    : 'bg-[#426B5B] border-[#426B5B] text-white'
+                  : 'border-[#E5EAE7] dark:border-[#273830]'
+              }`}
+            >
+              {n}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+/** Suggested exercise block from the movement scores */
+const LevelBadge: React.FC<{ sections: EvaluationSection[]; values: Record<string, string> }> = ({ sections, values }) => {
+  const lv = computeMovementLevel(sections, values);
+  if (!lv) return null;
+  return (
+    <div className="p-3 rounded-xl bg-[#E9F1EC] dark:bg-[#1F332A] text-xs flex flex-wrap items-center gap-2">
+      <span className="font-bold text-[#345648] dark:text-[#9CCBB8]">Nível sugerido: {LEVEL_LABEL[lv.level]}</span>
+      <span className="text-[#64748B]">
+        média {lv.average.toFixed(2).replace('.', ',')} de 3 • {lv.answered}/{lv.total} movimentos avaliados
+      </span>
+    </div>
+  );
+};
+
+/** Prefills identification items from the patient registry */
+function prefill(sections: EvaluationSection[], patient: Patient): Record<string, string> {
+  const user = clinicStorage.getCurrentUser();
+  const today = new Date().toISOString().slice(0, 10);
+  const age = patient.birthDate ? Math.floor((Date.now() - new Date(patient.birthDate + 'T00:00:00').getTime()) / 31557600000) : undefined;
+  const a = patient.address;
+  const rules: [RegExp, string | undefined][] = [
+    [/^nome( completo)?$/i, patient.name],
+    [/e-?mail/i, patient.email],
+    [/^telefone|celular|whats/i, patient.phone],
+    [/^cpf$/i, patient.cpf],
+    [/endere/i, a && [a.street, a.number, a.neighborhood, a.city].filter(Boolean).join(', ')],
+    [/emerg/i, patient.emergencyContact?.name && `${patient.emergencyContact.name} ${patient.emergencyContact.phone || ''}`.trim()],
+    [/nasc/i, patient.birthDate],
+    [/^idade$/i, age !== undefined ? String(age) : undefined],
+    [/data da avalia/i, today],
+    [/fisioterapeuta|avaliador|profissional/i, user.name],
+  ];
+  const values: Record<string, string> = {};
+  sections.forEach((s) =>
+    s.fields.forEach((fl) => {
+      const hit = rules.find(([re]) => re.test(fl.label.trim()));
+      if (hit?.[1]) values[fl.id] = hit[1];
+    })
+  );
+  return values;
+}
+
+const EvaluationForm: React.FC<{ record: EvaluationRecord; onClose: () => void }> = ({ record, onClose }) => {
+  const { showToast } = useToast();
+  const [rec, setRec] = useState(record);
+  const [date, setDate] = useState(record.date);
+
+  const handleSave = () => {
+    if (!clinicStorage.saveEvaluation({ ...rec, date })) return showToast('Não foi possível salvar (armazenamento cheio).', 'error');
+    showToast('Avaliação salva no perfil do aluno!', 'success');
+    onClose();
+  };
+
+  return (
+    <Sheet
+      title={`${rec.templateName} — ${rec.patientName}`}
+      onClose={onClose}
+      actions={
+        <button onClick={handleSave} className={btnPrimary}>
+          <CheckCircle2 className="w-4 h-4" /> Salvar
+        </button>
+      }
+    >
+      <div className="h-full overflow-y-auto p-3 sm:p-5">
+        <div className="max-w-3xl mx-auto space-y-4 pb-10">
+          <div className="flex flex-wrap items-end gap-3">
+            <div>
+              <label className="block text-xs font-semibold mb-1">Data do registro</label>
+              <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={input} />
+            </div>
+            <p className="text-[11px] text-[#64748B]">Profissional: {rec.professionalName}</p>
+          </div>
+          {rec.sections.map((sec) => (
+            <section key={sec.id} className="rounded-xl border border-[#E5EAE7] dark:border-[#273830] bg-white dark:bg-[#17231D] p-3 sm:p-4">
+              <h3 className="text-sm font-bold mb-3">{sec.title}</h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {sec.fields.map((fl) => (
+                  <FieldInput
+                    key={fl.id}
+                    field={fl}
+                    value={rec.values[fl.id] || ''}
+                    detail={rec.details?.[fl.id] || ''}
+                    onChange={(v) => setRec((r) => ({ ...r, values: { ...r.values, [fl.id]: v } }))}
+                    onDetail={(v) => setRec((r) => ({ ...r, details: { ...r.details, [fl.id]: v } }))}
+                  />
+                ))}
+              </div>
+            </section>
+          ))}
+          <LevelBadge sections={rec.sections} values={rec.values} />
+        </div>
+      </div>
+    </Sheet>
+  );
+};
+
+const EvaluationPrint: React.FC<{ rec: EvaluationRecord; onClose: () => void }> = ({ rec, onClose }) => {
+  const printId = `ev-print-${rec.id}`;
+  const settings = clinicStorage.getSettings();
+  return (
+    <Sheet
+      title={`${rec.templateName} — ${rec.patientName}`}
+      onClose={onClose}
+      actions={
+        <button onClick={() => printElement(document.getElementById(printId), `${rec.templateName} — ${rec.patientName}`)} className={btn}>
+          <Printer className="w-4 h-4" /> Imprimir / PDF
+        </button>
+      }
+    >
+      <div className="h-full overflow-y-auto p-3 sm:p-5">
+        <article id={printId} className="max-w-3xl mx-auto bg-white dark:bg-[#17231D] rounded-xl border border-[#E5EAE7] dark:border-[#273830] p-4 sm:p-6 space-y-4 text-xs">
+          <header className="text-center space-y-0.5">
+            <h2 className="text-base font-bold">{rec.templateName}</h2>
+            <p>
+              {rec.patientName} • {formatDate(rec.date)} • {rec.professionalName}
+            </p>
+            <p className="text-[#64748B]">{settings.clinicName}</p>
+          </header>
+          {rec.sections.map((sec) => (
+            <section key={sec.id}>
+              <h3 className="font-bold uppercase tracking-wide text-[11px] border-b border-[#E5EAE7] dark:border-[#273830] pb-1 mb-1.5">{sec.title}</h3>
+              <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1">
+                {sec.fields.map((fl) => (
+                  <div key={fl.id} className="flex gap-1.5">
+                    <dt className="font-semibold shrink-0">{fl.label}:</dt>
+                    <dd className="text-[#475569] dark:text-[#9AA8B6] whitespace-pre-wrap">{formatAnswer(fl, rec) || '—'}</dd>
+                  </div>
+                ))}
+              </dl>
+            </section>
+          ))}
+          <LevelBadge sections={rec.sections} values={rec.values} />
+        </article>
+      </div>
+    </Sheet>
+  );
+};
+
+// ───────────────────────── Patient panel (section + patient profile) ─────────────────────────
+
+export const EvaluationsPanel: React.FC<{ patient: Patient }> = ({ patient }) => {
+  const { showToast } = useToast();
+  const [records, setRecords] = useState<EvaluationRecord[]>([]);
+  const [templates, setTemplates] = useState<EvaluationTemplate[]>([]);
+  const [pickTemplate, setPickTemplate] = useState(false);
+  const [editing, setEditing] = useState<EvaluationRecord | null>(null);
+  const [viewing, setViewing] = useState<EvaluationRecord | null>(null);
+  const [toDelete, setToDelete] = useState<EvaluationRecord | null>(null);
+
+  useEffect(() => {
+    const load = () => {
+      setRecords(clinicStorage.getEvaluations(patient.id));
+      setTemplates(clinicStorage.getEvaluationTemplates());
+    };
+    load();
+    return clinicStorage.subscribe(load);
+  }, [patient.id]);
+
+  const startFrom = (tpl: EvaluationTemplate) => {
+    const user = clinicStorage.getCurrentUser();
+    const sections = cloneSections(tpl.sections);
+    const now = new Date().toISOString();
+    setPickTemplate(false);
+    setEditing({
+      id: newId('aval'),
+      patientId: patient.id,
+      patientName: patient.name,
+      templateId: tpl.id,
+      templateName: tpl.name,
+      sections,
+      values: prefill(sections, patient),
+      details: {},
+      date: now.slice(0, 10),
+      professionalId: user.id,
+      professionalName: user.name,
+      createdAt: now,
+      updatedAt: now,
+    });
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="text-xs font-bold uppercase text-[#64748B] tracking-wider">Fichas de avaliação</h3>
+        <button onClick={() => (templates.length === 1 ? startFrom(templates[0]) : setPickTemplate(true))} className={btnPrimary}>
+          <Plus className="w-3.5 h-3.5" /> Nova avaliação
+        </button>
+      </div>
+
+      {records.length === 0 ? (
+        <p className="p-6 text-center text-xs text-[#64748B] rounded-xl border border-dashed border-[#E5EAE7] dark:border-[#273830]">
+          Nenhuma avaliação registrada para {patient.name.split(' ')[0]}.
+        </p>
+      ) : (
+        <ul className="space-y-2">
+          {records.map((r) => {
+            const lv = computeMovementLevel(r.sections, r.values);
+            return (
+              <li key={r.id} className="p-3 rounded-xl border border-[#E5EAE7] dark:border-[#273830] bg-white dark:bg-[#17231D] flex flex-wrap items-center gap-2">
+                <FileText className="w-4 h-4 text-[#426B5B] dark:text-[#7FB39F]" />
+                <div className="flex-1 min-w-[10rem]">
+                  <p className="text-sm font-semibold">{r.templateName}</p>
+                  <p className="text-[11px] text-[#64748B]">
+                    {formatDate(r.date)} • {r.professionalName}
+                    {lv && ` • Nível ${LEVEL_LABEL[lv.level]}`}
+                  </p>
+                </div>
+                <div className="flex gap-1">
+                  <button onClick={() => setViewing(r)} className={iconBtn} aria-label="Ver e imprimir">
+                    <Eye className="w-4 h-4" />
+                  </button>
+                  <button onClick={() => setEditing(r)} className={iconBtn} aria-label="Editar">
+                    <Pencil className="w-4 h-4" />
+                  </button>
+                  <button onClick={() => setToDelete(r)} className={`${iconBtn} hover:text-rose-600`} aria-label="Excluir">
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+
+      {pickTemplate && (
+        <Modal isOpen={true} onClose={() => setPickTemplate(false)} title="Escolha a ficha" description={patient.name} maxWidth="md">
+          <ul className="space-y-2">
+            {templates.map((t) => (
+              <li key={t.id}>
+                <button onClick={() => startFrom(t)} className={`${btn} w-full justify-start py-3`}>
+                  <ClipboardCheck className="w-4 h-4" /> {t.name}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </Modal>
+      )}
+      {editing && <EvaluationForm record={editing} onClose={() => setEditing(null)} />}
+      {viewing && <EvaluationPrint rec={viewing} onClose={() => setViewing(null)} />}
+      {toDelete && (
+        <Modal isOpen={true} onClose={() => setToDelete(null)} title="Excluir avaliação" description={`${toDelete.templateName} — ${formatDate(toDelete.date)}`} maxWidth="md">
+          <p className="text-xs">A avaliação será removida do perfil do aluno.</p>
+          <div className="flex justify-end gap-2 pt-4">
+            <button onClick={() => setToDelete(null)} className="px-4 py-2 text-xs font-semibold text-[#64748B]">
+              Cancelar
+            </button>
+            <button
+              onClick={() => {
+                clinicStorage.deleteEvaluation(toDelete.id);
+                showToast('Avaliação excluída.', 'info');
+                setToDelete(null);
+              }}
+              className="px-4 py-2 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-700 rounded-lg"
+            >
+              Excluir
+            </button>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+};
+
+// ───────────────────────── Section ─────────────────────────
+
+export const EvaluationsView: React.FC<{ patientId?: string }> = ({ patientId }) => {
+  const { showToast } = useToast();
+  const [tab, setTab] = useState<'alunos' | 'modelos'>('alunos');
+  const [patients, setPatients] = useState<Patient[]>([]);
+  const [templates, setTemplates] = useState<EvaluationTemplate[]>([]);
+  const [selectedId, setSelectedId] = useState(patientId || '');
+  const [search, setSearch] = useState('');
+  const [editingTpl, setEditingTpl] = useState<{ tpl: EvaluationTemplate; pdfPages?: string[] } | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [tplToDelete, setTplToDelete] = useState<EvaluationTemplate | null>(null);
+
+  useEffect(() => {
+    const load = () => {
+      setPatients(clinicStorage.getPatients().filter((p) => p.status !== 'arquivado'));
+      setTemplates(clinicStorage.getEvaluationTemplates());
+    };
+    load();
+    return clinicStorage.subscribe(load);
+  }, []);
+  useEffect(() => {
+    if (patientId) {
+      setSelectedId(patientId);
+      setTab('alunos');
+    }
+  }, [patientId]);
+
+  const filtered = useMemo(() => patients.filter((p) => p.name.toLowerCase().includes(search.trim().toLowerCase())), [patients, search]);
+  const selected = patients.find((p) => p.id === selectedId) || null;
+
+  const handleImport = async (file?: File) => {
+    if (!file) return;
+    if (file.type !== 'application/pdf' && !/\.pdf$/i.test(file.name)) return showToast('Escolha um arquivo PDF.', 'error');
+    setImporting(true);
+    try {
+      const [tpl, pages] = await Promise.all([templateFromPdf(file), renderPdfPages(file)]);
+      if (tpl.sections.length === 0) {
+        showToast('Não encontrei texto no PDF (pode ser uma foto/scan). Monte a ficha manualmente ao lado do PDF.', 'info');
+        tpl.sections = [{ id: newId('sec'), title: 'Nova seção', fields: [{ id: newId('fld'), label: '', type: 'text' }] }];
+      }
+      setEditingTpl({ tpl, pdfPages: pages });
+    } catch (err) {
+      console.error(err);
+      showToast('Não foi possível ler este PDF.', 'error');
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const tabBtn = (id: typeof tab, label: string) => (
+    <button
+      role="tab"
+      aria-selected={tab === id}
+      onClick={() => setTab(id)}
+      className={`flex-1 sm:flex-none px-4 py-2 rounded-lg text-xs font-semibold ${tab === id ? 'bg-[#426B5B] text-white' : 'text-[#64748B] hover:bg-[#F1F5F3] dark:hover:bg-[#1F332A]'}`}
+    >
+      {label}
+    </button>
+  );
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <h1 className="text-xl sm:text-2xl font-bold tracking-tight flex items-center gap-2">
+          <ClipboardCheck className="w-6 h-6 text-[#426B5B] dark:text-[#7FB39F]" /> Avaliações
+        </h1>
+        <p className="text-xs sm:text-sm text-[#64748B] dark:text-[#94A3B8]">
+          Fichas de avaliação editáveis: monte do seu jeito ou importe do PDF da clínica, e registre no perfil de cada aluno.
+        </p>
+      </div>
+
+      <div role="tablist" className="flex gap-1 p-1 rounded-xl bg-white dark:bg-[#141F19] border border-[#E5EAE7] dark:border-[#263730] w-full sm:w-fit">
+        {tabBtn('alunos', 'Avaliações dos alunos')}
+        {tabBtn('modelos', `Modelos de ficha (${templates.length})`)}
+      </div>
+
+      {tab === 'alunos' ? (
+        <div className="grid grid-cols-1 lg:grid-cols-[16rem_1fr] gap-4">
+          <div className="space-y-2">
+            <div className="relative">
+              <Search className="w-4 h-4 text-[#64748B] absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Buscar aluno…"
+                aria-label="Buscar aluno"
+                className="w-full pl-9 pr-3 py-2 text-xs bg-white dark:bg-[#141F19] border border-[#E5EAE7] dark:border-[#263730] rounded-lg"
+              />
+            </div>
+            <select
+              value={selectedId}
+              onChange={(e) => setSelectedId(e.target.value)}
+              aria-label="Aluno"
+              className="lg:hidden w-full px-3 py-2 text-sm bg-white dark:bg-[#141F19] border border-[#E5EAE7] dark:border-[#263730] rounded-lg"
+            >
+              <option value="">Selecione um aluno…</option>
+              {filtered.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+            <ul className="hidden lg:block max-h-[70vh] overflow-y-auto rounded-xl border border-[#E5EAE7] dark:border-[#263730] bg-white dark:bg-[#141F19] divide-y divide-[#E5EAE7] dark:divide-[#263730]">
+              {filtered.map((p) => (
+                <li key={p.id}>
+                  <button
+                    onClick={() => setSelectedId(p.id)}
+                    className={`w-full text-left px-3 py-2.5 text-xs ${
+                      p.id === selectedId ? 'bg-[#E9F1EC] dark:bg-[#1F332A] font-bold text-[#345648] dark:text-[#9CCBB8]' : 'hover:bg-[#F8FAF9] dark:hover:bg-[#111A15]'
+                    }`}
+                  >
+                    {p.name}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+          <div>
+            {selected ? (
+              <EvaluationsPanel key={selected.id} patient={selected} />
+            ) : (
+              <div className="p-10 text-center rounded-xl border border-dashed border-[#E5EAE7] dark:border-[#263730] text-sm text-[#64748B]">
+                Selecione um aluno para ver ou registrar avaliações.
+              </div>
+            )}
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <label
+              className={`flex items-center gap-3 p-4 rounded-2xl border-2 border-dashed border-[#426B5B]/50 bg-white dark:bg-[#141F19] cursor-pointer hover:bg-[#E9F1EC] dark:hover:bg-[#1F332A] ${
+                importing ? 'opacity-60 pointer-events-none' : ''
+              }`}
+            >
+              {importing ? <Loader2 className="w-6 h-6 animate-spin text-[#426B5B]" /> : <FileUp className="w-6 h-6 text-[#426B5B] dark:text-[#7FB39F]" />}
+              <span>
+                <span className="block text-sm font-bold">{importing ? 'Lendo o PDF…' : 'Importar ficha de um PDF'}</span>
+                <span className="block text-[11px] text-[#64748B]">
+                  O sistema lê o PDF e monta a ficha. Você confere lado a lado e ajusta antes de salvar.
+                </span>
+              </span>
+              <input
+                type="file"
+                accept="application/pdf,.pdf"
+                className="sr-only"
+                onChange={(e) => {
+                  handleImport(e.target.files?.[0]);
+                  e.target.value = '';
+                }}
+              />
+            </label>
+            <button
+              onClick={() => {
+                const now = new Date().toISOString();
+                setEditingTpl({
+                  tpl: {
+                    id: newId('tpl'),
+                    name: 'Nova ficha',
+                    sections: [{ id: newId('sec'), title: 'Identificação', fields: [{ id: newId('fld'), label: 'Nome', type: 'text' }] }],
+                    createdAt: now,
+                    updatedAt: now,
+                  },
+                });
+              }}
+              className="flex items-center gap-3 p-4 rounded-2xl border border-[#E5EAE7] dark:border-[#263730] bg-white dark:bg-[#141F19] text-left hover:bg-[#F8FAF9] dark:hover:bg-[#1F332A]"
+            >
+              <Plus className="w-6 h-6 text-[#426B5B] dark:text-[#7FB39F]" />
+              <span>
+                <span className="block text-sm font-bold">Criar ficha do zero</span>
+                <span className="block text-[11px] text-[#64748B]">Adicione seções e itens do jeito que preferir.</span>
+              </span>
+            </button>
+          </div>
+
+          <ul className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {templates.map((t) => (
+              <li key={t.id} className="p-4 rounded-2xl border border-[#E5EAE7] dark:border-[#263730] bg-white dark:bg-[#141F19] space-y-2">
+                <div className="flex items-start gap-2">
+                  <ClipboardCheck className="w-5 h-5 mt-0.5 text-[#426B5B] dark:text-[#7FB39F]" />
+                  <div className="flex-1 min-w-0">
+                    <p className="font-bold text-sm">{t.name}</p>
+                    <p className="text-[11px] text-[#64748B]">
+                      {t.sections.length} seções • {t.sections.reduce((n, s) => n + s.fields.length, 0)} itens
+                      {t.sourceFileName && ` • de ${t.sourceFileName}`}
+                    </p>
+                  </div>
+                </div>
+                <p className="text-[11px] text-[#64748B] line-clamp-2">{t.sections.map((s) => s.title).join(' • ')}</p>
+                <div className="flex flex-wrap gap-1.5">
+                  <button onClick={() => setEditingTpl({ tpl: { ...t, sections: cloneSections(t.sections) } })} className={btn}>
+                    <Pencil className="w-3.5 h-3.5" /> Editar
+                  </button>
+                  <button
+                    onClick={() => {
+                      const now = new Date().toISOString();
+                      clinicStorage.saveEvaluationTemplate({ ...t, id: newId('tpl'), name: `${t.name} (cópia)`, sections: cloneSections(t.sections, true), createdAt: now, updatedAt: now });
+                      showToast('Cópia criada.', 'success');
+                    }}
+                    className={btn}
+                  >
+                    <Copy className="w-3.5 h-3.5" /> Duplicar
+                  </button>
+                  <button onClick={() => setTplToDelete(t)} className={`${btn} text-rose-600`} aria-label={`Excluir ${t.name}`}>
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+          <p className="text-[11px] text-[#64748B]">
+            Na “Avaliação do movimento”, cada item vale de 0 a 3. A média sugere o bloco de exercícios: abaixo de 1,5 Básico; até 2,25
+            Médio; acima, Avançado. Avaliações já registradas guardam a ficha usada e não mudam se o modelo for editado.
+          </p>
+        </div>
+      )}
+
+      {editingTpl && <TemplateEditor initial={editingTpl.tpl} pdfPages={editingTpl.pdfPages} onClose={() => setEditingTpl(null)} />}
+      {tplToDelete && (
+        <Modal isOpen={true} onClose={() => setTplToDelete(null)} title="Excluir modelo" description={tplToDelete.name} maxWidth="md">
+          <p className="text-xs">O modelo some da lista. Avaliações já registradas com ele continuam salvas.</p>
+          <div className="flex justify-end gap-2 pt-4">
+            <button onClick={() => setTplToDelete(null)} className="px-4 py-2 text-xs font-semibold text-[#64748B]">
+              Cancelar
+            </button>
+            <button
+              onClick={() => {
+                if (templates.length === 1) {
+                  // keep at least one template: replace the last one by the standard ficha
+                  clinicStorage.saveEvaluationTemplate(buildDefaultTemplate());
+                }
+                clinicStorage.deleteEvaluationTemplate(tplToDelete.id);
+                showToast('Modelo excluído.', 'info');
+                setTplToDelete(null);
+              }}
+              className="px-4 py-2 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-700 rounded-lg"
+            >
+              Excluir
+            </button>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+};
