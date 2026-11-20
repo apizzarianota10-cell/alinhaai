@@ -475,3 +475,11 @@ export interface EvaluationRecord {
   createdAt: string;
   updatedAt: string;
 }
+
+/** A birthday congratulation sent to a patient (one per patient per year) */
+export interface BirthdayGreeting {
+  patientId: string;
+  year: number;
+  date: string; // YYYY-MM-DD
+  by?: string;
+}

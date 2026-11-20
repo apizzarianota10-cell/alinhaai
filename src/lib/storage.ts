@@ -19,6 +19,7 @@ import {
   PresenceSheet,
   EvaluationTemplate,
   EvaluationRecord,
+  BirthdayGreeting,
 } from '../types';
 import {
   INITIAL_PATIENTS,
@@ -56,6 +57,7 @@ const STORAGE_KEYS = {
   PRESENCE: 'pilatesflow_presence',
   EVALUATION_TEMPLATES: 'pilatesflow_evaluation_templates',
   EVALUATIONS: 'pilatesflow_evaluations',
+  BIRTHDAY_GREETINGS: 'pilatesflow_birthday_greetings',
 };
 
 /** Clinic data shared between devices/users (sync + backup). Per-device state is left out. */
@@ -74,6 +76,7 @@ export const SYNCED_KEYS = [
   STORAGE_KEYS.PRESENCE,
   STORAGE_KEYS.EVALUATION_TEMPLATES,
   STORAGE_KEYS.EVALUATIONS,
+  STORAGE_KEYS.BIRTHDAY_GREETINGS,
 ];
 
 const BACKUP_APP_ID = 'pilatesflow-backup';
@@ -164,6 +167,7 @@ export const clinicStorage = {
     setItem(STORAGE_KEYS.PRESENCE, []);
     setItem(STORAGE_KEYS.EVALUATION_TEMPLATES, []);
     setItem(STORAGE_KEYS.EVALUATIONS, []);
+    setItem(STORAGE_KEYS.BIRTHDAY_GREETINGS, []);
     localStorage.removeItem(STORAGE_KEYS.BIRTHDAY_POPUP_DISMISSED);
     notify();
   },
@@ -371,6 +375,30 @@ export const clinicStorage = {
 
   deletePlan(id: string): void {
     setItem(STORAGE_KEYS.PLANS, this.getPlans().filter((p) => p.id !== id));
+  },
+
+  // BIRTHDAY GREETINGS (who was congratulated, per year)
+  getBirthdayGreetings(year = new Date().getFullYear()): BirthdayGreeting[] {
+    return getItem<BirthdayGreeting[]>(STORAGE_KEYS.BIRTHDAY_GREETINGS, []).filter((g) => g.year === year);
+  },
+
+  markBirthdayGreeted(patientId: string, by?: string): void {
+    const year = new Date().getFullYear();
+    const all = getItem<BirthdayGreeting[]>(STORAGE_KEYS.BIRTHDAY_GREETINGS, []);
+    if (all.some((g) => g.patientId === patientId && g.year === year)) return;
+    // keep only the last two years so the list stays small
+    setItem(STORAGE_KEYS.BIRTHDAY_GREETINGS, [
+      ...all.filter((g) => g.year >= year - 1),
+      { patientId, year, date: toLocalDateKey(), by },
+    ]);
+  },
+
+  unmarkBirthdayGreeted(patientId: string): void {
+    const year = new Date().getFullYear();
+    setItem(
+      STORAGE_KEYS.BIRTHDAY_GREETINGS,
+      getItem<BirthdayGreeting[]>(STORAGE_KEYS.BIRTHDAY_GREETINGS, []).filter((g) => !(g.patientId === patientId && g.year === year))
+    );
   },
 
   // PRESENCE (Controle de Presença)

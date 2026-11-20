@@ -174,6 +174,7 @@ export async function createClinic(clinicName: string, adminName: string, import
         pilatesflow_presence: [],
         pilatesflow_evaluation_templates: [],
         pilatesflow_evaluations: [],
+        pilatesflow_birthday_greetings: [],
         pilatesflow_plans: INITIAL_PLANS,
         pilatesflow_exercises: INITIAL_EXERCISES,
         pilatesflow_professionals: [
@@ -230,6 +231,7 @@ export async function startSync(membership: Membership): Promise<void> {
     pilatesflow_presence: [],
     pilatesflow_evaluation_templates: [],
     pilatesflow_evaluations: [],
+    pilatesflow_birthday_greetings: [],
     pilatesflow_plans: INITIAL_PLANS,
     pilatesflow_exercises: INITIAL_EXERCISES,
     pilatesflow_settings: { ...DEFAULT_SETTINGS, clinicName: membership.clinicName },

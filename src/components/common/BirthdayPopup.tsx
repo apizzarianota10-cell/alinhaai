@@ -56,6 +56,7 @@ export const BirthdayPopup: React.FC<BirthdayPopupProps> = ({
 
   const handleSendGreeting = (alert: BirthdayAlert) => {
     openExternalLink(buildWhatsAppLink(alert.whatsapp, buildBirthdayMessage(settings, alert.patientName)));
+    clinicStorage.markBirthdayGreeted(alert.patientId, clinicStorage.getCurrentUser().name);
   };
 
   useEffect(() => {
