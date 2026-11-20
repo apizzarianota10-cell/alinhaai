@@ -15,7 +15,11 @@ import {
   Loader2,
   Search,
   CheckCircle2,
+  Download,
+  Save,
+  RotateCcw,
 } from 'lucide-react';
+import { downloadEvaluationPdf } from '../../lib/pdf';
 import { clinicStorage } from '../../lib/storage';
 import { formatDate, printElement } from '../../lib/utils';
 import {
@@ -423,7 +427,8 @@ function prefill(sections: EvaluationSection[], patient: Patient): Record<string
     [/nasc/i, patient.birthDate],
     [/^idade$/i, age !== undefined ? String(age) : undefined],
     [/data da avalia/i, today],
-    [/fisioterapeuta|avaliador|profissional/i, user.name],
+    // only the evaluator's own field — not "Atividade profissional"
+    [/^(fisioterapeuta|avaliador(a)?|profissional( respons[aá]vel)?|instrutor(a)?)$/i, user.name],
   ];
   const values: Record<string, string> = {};
   sections.forEach((s) =>
@@ -434,6 +439,290 @@ function prefill(sections: EvaluationSection[], patient: Patient): Record<string
   );
   return values;
 }
+
+/** The fillable ficha itself (used inline in the section and in the patient profile) */
+const EvaluationFormBody: React.FC<{ rec: EvaluationRecord; setRec: React.Dispatch<React.SetStateAction<EvaluationRecord>> }> = ({
+  rec,
+  setRec,
+}) => (
+  <>
+    {rec.sections.map((sec) => (
+      <section key={sec.id} className="rounded-xl border border-[#E5EAE7] dark:border-[#273830] bg-white dark:bg-[#17231D] p-3 sm:p-4">
+        <h3 className="text-sm font-bold mb-3">{sec.title}</h3>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {sec.fields.map((fl) => (
+            <FieldInput
+              key={fl.id}
+              field={fl}
+              value={rec.values[fl.id] || ''}
+              detail={rec.details?.[fl.id] || ''}
+              onChange={(v) => setRec((r) => ({ ...r, values: { ...r.values, [fl.id]: v } }))}
+              onDetail={(v) => setRec((r) => ({ ...r, details: { ...r.details, [fl.id]: v } }))}
+            />
+          ))}
+        </div>
+      </section>
+    ))}
+    <LevelBadge sections={rec.sections} values={rec.values} />
+  </>
+);
+
+/** Downloads the PDF of a record, with a toast on failure */
+async function savePdf(rec: EvaluationRecord, showToast: (m: string, t?: any) => void) {
+  try {
+    await downloadEvaluationPdf(rec, clinicStorage.getSettings());
+  } catch (e) {
+    console.error(e);
+    showToast('Não foi possível gerar o PDF.', 'error');
+  }
+}
+
+/** A new, prefilled evaluation of `patient` using `tpl` */
+function newRecord(tpl: EvaluationTemplate, patient: Patient): EvaluationRecord {
+  const user = clinicStorage.getCurrentUser();
+  const sections = cloneSections(tpl.sections);
+  const now = new Date().toISOString();
+  return {
+    id: newId('aval'),
+    patientId: patient.id,
+    patientName: patient.name,
+    templateId: tpl.id,
+    templateName: tpl.name,
+    sections,
+    values: prefill(sections, patient),
+    details: {},
+    date: now.slice(0, 10),
+    professionalId: user.id,
+    professionalName: user.name,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+/**
+ * The Avaliação section: pick the student and the ficha, fill it in on the page, save it and
+ * download the PDF. Earlier evaluations of the student are listed below to reopen.
+ */
+const EvaluationWorkspace: React.FC<{ patients: Patient[]; templates: EvaluationTemplate[]; initialPatientId?: string }> = ({
+  patients,
+  templates,
+  initialPatientId,
+}) => {
+  const { showToast } = useToast();
+  const [patientId, setPatientId] = useState(initialPatientId || '');
+  const [templateId, setTemplateId] = useState(templates[0]?.id || '');
+  const [rec, setRec] = useState<EvaluationRecord | null>(null);
+  const [savedSnapshot, setSavedSnapshot] = useState('');
+  const [history, setHistory] = useState<EvaluationRecord[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [toDelete, setToDelete] = useState<EvaluationRecord | null>(null);
+  const patient = patients.find((p) => p.id === patientId) || null;
+  const dirty = !!rec && JSON.stringify([rec.values, rec.details, rec.date]) !== savedSnapshot;
+
+  useEffect(() => {
+    if (initialPatientId) setPatientId(initialPatientId);
+  }, [initialPatientId]);
+  useEffect(() => {
+    if (!templates.some((t) => t.id === templateId)) setTemplateId(templates[0]?.id || '');
+  }, [templates, templateId]);
+  useEffect(() => {
+    const load = () => setHistory(patientId ? clinicStorage.getEvaluations(patientId) : []);
+    load();
+    return clinicStorage.subscribe(load);
+  }, [patientId]);
+
+  const open = (r: EvaluationRecord | null) => {
+    setRec(r);
+    setSavedSnapshot(r && clinicStorage.getEvaluations(r.patientId).some((e) => e.id === r.id) ? JSON.stringify([r.values, r.details, r.date]) : '');
+  };
+  // a new blank (prefilled) ficha whenever the student or the ficha changes
+  useEffect(() => {
+    const tpl = templates.find((t) => t.id === templateId);
+    open(patient && tpl ? newRecord(tpl, patient) : null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [patientId, templateId]);
+
+  const confirmDiscard = () => !dirty || window.confirm('Há alterações não salvas nesta avaliação. Descartar?');
+
+  const handleSave = () => {
+    if (!rec) return null;
+    const toSave = { ...rec, updatedAt: new Date().toISOString() };
+    if (!clinicStorage.saveEvaluation(toSave)) {
+      showToast('Não foi possível salvar (armazenamento cheio).', 'error');
+      return null;
+    }
+    setSavedSnapshot(JSON.stringify([toSave.values, toSave.details, toSave.date]));
+    showToast('Avaliação salva no perfil do aluno!', 'success');
+    return toSave;
+  };
+
+  const handlePdf = async () => {
+    if (!rec) return;
+    setBusy(true);
+    // the downloaded ficha always matches what is stored
+    const saved = dirty ? handleSave() : rec;
+    if (saved) await savePdf(saved, showToast);
+    setBusy(false);
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* selection bar */}
+      <div className="p-3 rounded-xl border border-[#E5EAE7] dark:border-[#263730] bg-white dark:bg-[#141F19] grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-2 sm:items-end">
+        <div>
+          <label htmlFor="ev-aluno" className="block text-xs font-semibold mb-1">Aluno</label>
+          <select
+            id="ev-aluno"
+            value={patientId}
+            onChange={(e) => confirmDiscard() && setPatientId(e.target.value)}
+            className={input}
+          >
+            <option value="">Selecione o aluno…</option>
+            {patients.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label htmlFor="ev-ficha" className="block text-xs font-semibold mb-1">Ficha</label>
+          <select
+            id="ev-ficha"
+            value={templateId}
+            onChange={(e) => confirmDiscard() && setTemplateId(e.target.value)}
+            className={input}
+          >
+            {templates.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        {rec && (
+          <div>
+            <label htmlFor="ev-data" className="block text-xs font-semibold mb-1">Data</label>
+            <input id="ev-data" type="date" value={rec.date} onChange={(e) => setRec({ ...rec, date: e.target.value })} className={input} />
+          </div>
+        )}
+      </div>
+
+      {!rec ? (
+        <div className="p-10 text-center rounded-xl border border-dashed border-[#E5EAE7] dark:border-[#263730] text-sm text-[#64748B]">
+          Selecione o aluno para preencher a avaliação.
+        </div>
+      ) : (
+        <>
+          {/* actions stay visible while scrolling the ficha */}
+          <div className="sticky top-0 z-10 -mx-1 px-1 py-2 bg-[#F6F8F7]/95 dark:bg-[#0C130F]/95 backdrop-blur flex flex-wrap items-center gap-2">
+            <span className="text-xs text-[#64748B] flex-1 min-w-[10rem]">
+              {savedSnapshot ? (dirty ? 'Alterações não salvas' : 'Salva') : 'Nova avaliação (ainda não salva)'} • {rec.professionalName}
+            </span>
+            <button
+              onClick={() => {
+                if (!confirmDiscard()) return;
+                const tpl = templates.find((t) => t.id === templateId);
+                if (tpl && patient) open(newRecord(tpl, patient));
+              }}
+              className={btn}
+            >
+              <RotateCcw className="w-3.5 h-3.5" /> Nova
+            </button>
+            <button onClick={handleSave} className={btn}>
+              <Save className="w-3.5 h-3.5" /> Salvar
+            </button>
+            <button onClick={handlePdf} disabled={busy} className={`${btnPrimary} disabled:opacity-60`}>
+              {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />} Baixar PDF
+            </button>
+          </div>
+
+          <div className="space-y-4">
+            <EvaluationFormBody rec={rec} setRec={setRec as React.Dispatch<React.SetStateAction<EvaluationRecord>>} />
+          </div>
+        </>
+      )}
+
+      {patient && history.length > 0 && (
+        <section className="space-y-2" aria-labelledby="ev-hist">
+          <h3 id="ev-hist" className="text-xs font-bold uppercase text-[#64748B] tracking-wider">
+            Avaliações anteriores de {patient.name.split(' ')[0]}
+          </h3>
+          <ul className="space-y-2">
+            {history.map((r) => {
+              const lv = computeMovementLevel(r.sections, r.values);
+              const isOpen = rec?.id === r.id;
+              return (
+                <li
+                  key={r.id}
+                  className={`p-3 rounded-xl border bg-white dark:bg-[#17231D] flex flex-wrap items-center gap-2 ${
+                    isOpen ? 'border-[#426B5B]' : 'border-[#E5EAE7] dark:border-[#273830]'
+                  }`}
+                >
+                  <FileText className="w-4 h-4 text-[#426B5B] dark:text-[#7FB39F]" />
+                  <div className="flex-1 min-w-[10rem]">
+                    <p className="text-sm font-semibold">
+                      {r.templateName} {isOpen && <span className="text-[10px] font-bold text-[#426B5B]">(aberta)</span>}
+                    </p>
+                    <p className="text-[11px] text-[#64748B]">
+                      {formatDate(r.date)} • {r.professionalName}
+                      {lv && ` • Nível ${LEVEL_LABEL[lv.level]}`}
+                    </p>
+                  </div>
+                  <div className="flex gap-1">
+                    <button
+                      onClick={() => {
+                        if (!confirmDiscard()) return;
+                        open({ ...r, sections: cloneSections(r.sections) });
+                        window.scrollTo({ top: 0, behavior: 'smooth' });
+                        document.querySelector('main')?.scrollTo({ top: 0, behavior: 'smooth' });
+                      }}
+                      className={iconBtn}
+                      aria-label="Abrir para editar"
+                    >
+                      <Pencil className="w-4 h-4" />
+                    </button>
+                    <button onClick={() => savePdf(r, showToast)} className={iconBtn} aria-label="Baixar PDF">
+                      <Download className="w-4 h-4" />
+                    </button>
+                    <button onClick={() => setToDelete(r)} className={`${iconBtn} hover:text-rose-600`} aria-label="Excluir">
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      )}
+
+      {toDelete && (
+        <Modal isOpen={true} onClose={() => setToDelete(null)} title="Excluir avaliação" description={`${toDelete.templateName} — ${formatDate(toDelete.date)}`} maxWidth="md">
+          <p className="text-xs">A avaliação será removida do perfil do aluno.</p>
+          <div className="flex justify-end gap-2 pt-4">
+            <button onClick={() => setToDelete(null)} className="px-4 py-2 text-xs font-semibold text-[#64748B]">
+              Cancelar
+            </button>
+            <button
+              onClick={() => {
+                clinicStorage.deleteEvaluation(toDelete.id);
+                if (rec?.id === toDelete.id) {
+                  const tpl = templates.find((t) => t.id === templateId);
+                  open(tpl && patient ? newRecord(tpl, patient) : null);
+                }
+                showToast('Avaliação excluída.', 'info');
+                setToDelete(null);
+              }}
+              className="px-4 py-2 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-700 rounded-lg"
+            >
+              Excluir
+            </button>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+};
 
 const EvaluationForm: React.FC<{ record: EvaluationRecord; onClose: () => void }> = ({ record, onClose }) => {
   const { showToast } = useToast();
@@ -451,9 +740,21 @@ const EvaluationForm: React.FC<{ record: EvaluationRecord; onClose: () => void }
       title={`${rec.templateName} — ${rec.patientName}`}
       onClose={onClose}
       actions={
-        <button onClick={handleSave} className={btnPrimary}>
-          <CheckCircle2 className="w-4 h-4" /> Salvar
-        </button>
+        <>
+          <button
+            onClick={() => {
+              const toSave = { ...rec, date };
+              if (clinicStorage.saveEvaluation(toSave)) savePdf(toSave, showToast);
+            }}
+            className={btn}
+            title="Salva e baixa o PDF"
+          >
+            <Download className="w-4 h-4" /> <span className="hidden sm:inline">Baixar PDF</span>
+          </button>
+          <button onClick={handleSave} className={btnPrimary}>
+            <CheckCircle2 className="w-4 h-4" /> Salvar
+          </button>
+        </>
       }
     >
       <div className="h-full overflow-y-auto p-3 sm:p-5">
@@ -465,24 +766,7 @@ const EvaluationForm: React.FC<{ record: EvaluationRecord; onClose: () => void }
             </div>
             <p className="text-[11px] text-[#64748B]">Profissional: {rec.professionalName}</p>
           </div>
-          {rec.sections.map((sec) => (
-            <section key={sec.id} className="rounded-xl border border-[#E5EAE7] dark:border-[#273830] bg-white dark:bg-[#17231D] p-3 sm:p-4">
-              <h3 className="text-sm font-bold mb-3">{sec.title}</h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {sec.fields.map((fl) => (
-                  <FieldInput
-                    key={fl.id}
-                    field={fl}
-                    value={rec.values[fl.id] || ''}
-                    detail={rec.details?.[fl.id] || ''}
-                    onChange={(v) => setRec((r) => ({ ...r, values: { ...r.values, [fl.id]: v } }))}
-                    onDetail={(v) => setRec((r) => ({ ...r, details: { ...r.details, [fl.id]: v } }))}
-                  />
-                ))}
-              </div>
-            </section>
-          ))}
-          <LevelBadge sections={rec.sections} values={rec.values} />
+          <EvaluationFormBody rec={rec} setRec={setRec} />
         </div>
       </div>
     </Sheet>
@@ -490,6 +774,7 @@ const EvaluationForm: React.FC<{ record: EvaluationRecord; onClose: () => void }
 };
 
 const EvaluationPrint: React.FC<{ rec: EvaluationRecord; onClose: () => void }> = ({ rec, onClose }) => {
+  const { showToast } = useToast();
   const printId = `ev-print-${rec.id}`;
   const settings = clinicStorage.getSettings();
   return (
@@ -497,9 +782,14 @@ const EvaluationPrint: React.FC<{ rec: EvaluationRecord; onClose: () => void }> 
       title={`${rec.templateName} — ${rec.patientName}`}
       onClose={onClose}
       actions={
-        <button onClick={() => printElement(document.getElementById(printId), `${rec.templateName} — ${rec.patientName}`)} className={btn}>
-          <Printer className="w-4 h-4" /> Imprimir / PDF
-        </button>
+        <>
+          <button onClick={() => printElement(document.getElementById(printId), `${rec.templateName} — ${rec.patientName}`)} className={btn}>
+            <Printer className="w-4 h-4" /> <span className="hidden sm:inline">Imprimir</span>
+          </button>
+          <button onClick={() => savePdf(rec, showToast)} className={btnPrimary}>
+            <Download className="w-4 h-4" /> Baixar PDF
+          </button>
+        </>
       }
     >
       <div className="h-full overflow-y-auto p-3 sm:p-5">
@@ -724,66 +1014,17 @@ export const EvaluationsView: React.FC<{ patientId?: string }> = ({ patientId })
           <ClipboardCheck className="w-6 h-6 text-[#426B5B] dark:text-[#7FB39F]" /> Avaliações
         </h1>
         <p className="text-xs sm:text-sm text-[#64748B] dark:text-[#94A3B8]">
-          Fichas de avaliação editáveis: monte do seu jeito ou importe do PDF da clínica, e registre no perfil de cada aluno.
+          Preencha a ficha do aluno direto aqui e baixe o PDF. Na aba “Editar ficha” você adiciona ou apaga itens e importa o PDF da clínica.
         </p>
       </div>
 
       <div role="tablist" className="flex gap-1 p-1 rounded-xl bg-white dark:bg-[#141F19] border border-[#E5EAE7] dark:border-[#263730] w-full sm:w-fit">
-        {tabBtn('alunos', 'Avaliações dos alunos')}
-        {tabBtn('modelos', `Modelos de ficha (${templates.length})`)}
+        {tabBtn('alunos', 'Preencher avaliação')}
+        {tabBtn('modelos', 'Editar ficha')}
       </div>
 
       {tab === 'alunos' ? (
-        <div className="grid grid-cols-1 lg:grid-cols-[16rem_1fr] gap-4">
-          <div className="space-y-2">
-            <div className="relative">
-              <Search className="w-4 h-4 text-[#64748B] absolute left-3 top-1/2 -translate-y-1/2" />
-              <input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Buscar aluno…"
-                aria-label="Buscar aluno"
-                className="w-full pl-9 pr-3 py-2 text-xs bg-white dark:bg-[#141F19] border border-[#E5EAE7] dark:border-[#263730] rounded-lg"
-              />
-            </div>
-            <select
-              value={selectedId}
-              onChange={(e) => setSelectedId(e.target.value)}
-              aria-label="Aluno"
-              className="lg:hidden w-full px-3 py-2 text-sm bg-white dark:bg-[#141F19] border border-[#E5EAE7] dark:border-[#263730] rounded-lg"
-            >
-              <option value="">Selecione um aluno…</option>
-              {filtered.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-            <ul className="hidden lg:block max-h-[70vh] overflow-y-auto rounded-xl border border-[#E5EAE7] dark:border-[#263730] bg-white dark:bg-[#141F19] divide-y divide-[#E5EAE7] dark:divide-[#263730]">
-              {filtered.map((p) => (
-                <li key={p.id}>
-                  <button
-                    onClick={() => setSelectedId(p.id)}
-                    className={`w-full text-left px-3 py-2.5 text-xs ${
-                      p.id === selectedId ? 'bg-[#E9F1EC] dark:bg-[#1F332A] font-bold text-[#345648] dark:text-[#9CCBB8]' : 'hover:bg-[#F8FAF9] dark:hover:bg-[#111A15]'
-                    }`}
-                  >
-                    {p.name}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </div>
-          <div>
-            {selected ? (
-              <EvaluationsPanel key={selected.id} patient={selected} />
-            ) : (
-              <div className="p-10 text-center rounded-xl border border-dashed border-[#E5EAE7] dark:border-[#263730] text-sm text-[#64748B]">
-                Selecione um aluno para ver ou registrar avaliações.
-              </div>
-            )}
-          </div>
-        </div>
+        <EvaluationWorkspace patients={patients} templates={templates} initialPatientId={selectedId || undefined} />
       ) : (
         <div className="space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

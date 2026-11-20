@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { CalendarCheck2, Plus, Printer, Trash2, Search, CheckCircle2, RotateCcw, XCircle } from 'lucide-react';
+import { CalendarCheck2, Plus, Printer, Trash2, Search, CheckCircle2, RotateCcw, XCircle, Download, ArrowLeft, Loader2 } from 'lucide-react';
 import { clinicStorage } from '../../lib/storage';
 import { formatDate, printElement } from '../../lib/utils';
+import { downloadPresencePdf, downloadPresenceOverviewPdf, PresenceSummary } from '../../lib/pdf';
 import { ManualPresenceEntry, Patient, PresenceMark, PresenceSheet } from '../../types';
 import { Modal } from '../common/Modal';
 import { useToast } from '../common/Toast';
@@ -19,7 +20,7 @@ const MARK_STYLE: Record<PresenceMark, string> = {
 };
 
 /** Attendance rows from the agenda (realizado → P, reposição realizada → C, faltou → F) plus manual entries */
-function buildRows(patientId: string, sheet: PresenceSheet): Row[] {
+export function buildRows(patientId: string, sheet: PresenceSheet): Row[] {
   const fromAgenda: Row[] = clinicStorage
     .getAppointments()
     .filter((a) => a.patientId === patientId && (a.status === 'realizado' || a.status === 'faltou'))
@@ -50,6 +51,7 @@ export const PresenceSheetPanel: React.FC<{ patient: Patient; compact?: boolean 
   const [addDate, setAddDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [addMark, setAddMark] = useState<PresenceMark>('P');
   const [addNote, setAddNote] = useState('');
+  const [pdfBusy, setPdfBusy] = useState(false);
   const settings = clinicStorage.getSettings();
 
   useEffect(() => {
@@ -117,12 +119,29 @@ export const PresenceSheetPanel: React.FC<{ patient: Patient; compact?: boolean 
             {patient.sessionsRemaining} sessões restantes no plano
           </span>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <button
             onClick={() => setIsAddOpen(true)}
             className="flex items-center gap-1 px-3 py-2 text-xs font-semibold text-white bg-[#426B5B] hover:bg-[#345648] rounded-lg"
           >
             <Plus className="w-3.5 h-3.5" /> Registrar
+          </button>
+          <button
+            disabled={pdfBusy}
+            onClick={async () => {
+              setPdfBusy(true);
+              try {
+                await downloadPresencePdf(patient, rows, { ...sheet.notes, ...notesDraft }, settings);
+              } catch (e) {
+                console.error(e);
+                showToast('Não foi possível gerar o PDF.', 'error');
+              } finally {
+                setPdfBusy(false);
+              }
+            }}
+            className="flex items-center gap-1 px-3 py-2 text-xs font-semibold border border-[#426B5B] text-[#426B5B] dark:text-[#7FB39F] rounded-lg hover:bg-[#E9F1EC] dark:hover:bg-[#1F332A] disabled:opacity-50"
+          >
+            {pdfBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />} Baixar PDF
           </button>
           <button
             onClick={() => printElement(document.getElementById(sheetId), `Controle de Presença — ${patient.name}`)}
@@ -292,12 +311,35 @@ export const PresenceSheetPanel: React.FC<{ patient: Patient; compact?: boolean 
 };
 
 export const PresenceView: React.FC<{ patientId?: string }> = ({ patientId }) => {
+  const { showToast } = useToast();
   const [patients, setPatients] = useState<Patient[]>([]);
+  const [summaries, setSummaries] = useState<PresenceSummary[]>([]);
   const [selectedId, setSelectedId] = useState<string>(patientId || '');
   const [search, setSearch] = useState('');
+  const [pdfBusy, setPdfBusy] = useState(false);
 
   useEffect(() => {
-    const load = () => setPatients(clinicStorage.getPatients().filter((p) => p.status !== 'arquivado'));
+    const load = () => {
+      const pts = clinicStorage.getPatients().filter((p) => p.status !== 'arquivado');
+      setPatients(pts);
+      // overview of every student, computed from the agenda + manual entries
+      setSummaries(
+        pts
+          .map((p) => {
+            const rows = buildRows(p.id, clinicStorage.getPresenceSheet(p.id));
+            const attended = rows.filter((r) => r.mark !== 'F');
+            return {
+              patient: p,
+              P: rows.filter((r) => r.mark === 'P').length,
+              C: rows.filter((r) => r.mark === 'C').length,
+              F: rows.filter((r) => r.mark === 'F').length,
+              last: attended[attended.length - 1]?.date,
+              cyclePos: attended.length % 30 || (attended.length ? 30 : 0),
+            };
+          })
+          .sort((a, b) => a.patient.name.localeCompare(b.patient.name))
+      );
+    };
     load();
     return clinicStorage.subscribe(load);
   }, []);
@@ -305,75 +347,152 @@ export const PresenceView: React.FC<{ patientId?: string }> = ({ patientId }) =>
     if (patientId) setSelectedId(patientId);
   }, [patientId]);
 
-  const filtered = useMemo(
-    () => patients.filter((p) => p.name.toLowerCase().includes(search.trim().toLowerCase())),
-    [patients, search]
-  );
+  const q = search.trim().toLowerCase();
+  const filtered = useMemo(() => summaries.filter((s) => s.patient.name.toLowerCase().includes(q)), [summaries, q]);
   const selected = patients.find((p) => p.id === selectedId) || null;
+  const totals = filtered.reduce((t, s) => ({ P: t.P + s.P, C: t.C + s.C, F: t.F + s.F }), { P: 0, C: 0, F: 0 });
+
+  const handleOverviewPdf = async () => {
+    setPdfBusy(true);
+    try {
+      await downloadPresenceOverviewPdf(filtered, clinicStorage.getSettings(), `${filtered.length} alunos - gerado em ${formatDate(new Date().toISOString().slice(0, 10))}`);
+    } catch (e) {
+      console.error(e);
+      showToast('Não foi possível gerar o PDF.', 'error');
+    } finally {
+      setPdfBusy(false);
+    }
+  };
 
   return (
     <div className="space-y-4">
-      <div>
-        <h1 className="text-xl sm:text-2xl font-bold tracking-tight flex items-center gap-2">
-          <CalendarCheck2 className="w-6 h-6 text-[#426B5B] dark:text-[#7FB39F]" /> Controle de Presença
-        </h1>
-        <p className="text-xs sm:text-sm text-[#64748B] dark:text-[#94A3B8]">
-          Presenças, compensações e faltas de cada aluno, com a percepção de evolução a cada 10 sessões e reavaliação a cada 30.
-        </p>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-[16rem_1fr] gap-4">
-        <div className="space-y-2">
-          <div className="relative">
-            <Search className="w-4 h-4 text-[#64748B] absolute left-3 top-1/2 -translate-y-1/2" />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Buscar aluno…"
-              aria-label="Buscar aluno"
-              className="w-full pl-9 pr-3 py-2 text-xs bg-white dark:bg-[#141F19] border border-[#E5EAE7] dark:border-[#263730] rounded-lg"
-            />
-          </div>
-          {/* phones: compact select; larger screens: list */}
-          <select
-            value={selectedId}
-            onChange={(e) => setSelectedId(e.target.value)}
-            aria-label="Aluno"
-            className="lg:hidden w-full px-3 py-2 text-sm bg-white dark:bg-[#141F19] border border-[#E5EAE7] dark:border-[#263730] rounded-lg"
-          >
-            <option value="">Selecione um aluno…</option>
-            {filtered.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-          <ul className="hidden lg:block max-h-[70vh] overflow-y-auto rounded-xl border border-[#E5EAE7] dark:border-[#263730] bg-white dark:bg-[#141F19] divide-y divide-[#E5EAE7] dark:divide-[#263730]">
-            {filtered.map((p) => (
-              <li key={p.id}>
-                <button
-                  onClick={() => setSelectedId(p.id)}
-                  className={`w-full text-left px-3 py-2.5 text-xs ${
-                    p.id === selectedId ? 'bg-[#E9F1EC] dark:bg-[#1F332A] font-bold text-[#345648] dark:text-[#9CCBB8]' : 'hover:bg-[#F8FAF9] dark:hover:bg-[#111A15]'
-                  }`}
-                >
-                  {p.name}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
-
+      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
         <div>
-          {selected ? (
-            <PresenceSheetPanel key={selected.id} patient={selected} />
-          ) : (
-            <div className="p-10 text-center rounded-xl border border-dashed border-[#E5EAE7] dark:border-[#263730] text-sm text-[#64748B]">
-              Selecione um aluno para ver o controle de presença.
-            </div>
-          )}
+          <h1 className="text-xl sm:text-2xl font-bold tracking-tight flex items-center gap-2">
+            <CalendarCheck2 className="w-6 h-6 text-[#426B5B] dark:text-[#7FB39F]" /> Controle de Presença
+          </h1>
+          <p className="text-xs sm:text-sm text-[#64748B] dark:text-[#94A3B8]">
+            Presenças, compensações e faltas de todos os alunos. Toque em um aluno para abrir a folha completa.
+          </p>
         </div>
+        {!selected && (
+          <button
+            onClick={handleOverviewPdf}
+            disabled={pdfBusy || filtered.length === 0}
+            className="self-start sm:self-auto flex items-center gap-1.5 px-3.5 py-2 text-xs sm:text-sm font-semibold text-white bg-[#426B5B] hover:bg-[#345648] rounded-lg disabled:opacity-50"
+          >
+            {pdfBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />} Baixar PDF
+          </button>
+        )}
       </div>
+
+      {selected ? (
+        <div className="space-y-3">
+          <button
+            onClick={() => setSelectedId('')}
+            className="flex items-center gap-1 text-xs font-semibold text-[#426B5B] dark:text-[#7FB39F] hover:underline"
+          >
+            <ArrowLeft className="w-4 h-4" /> Todos os alunos
+          </button>
+          <PresenceSheetPanel key={selected.id} patient={selected} />
+        </div>
+      ) : (
+        <>
+          <div className="flex flex-col sm:flex-row gap-2 sm:items-center sm:justify-between">
+            <div className="relative w-full sm:w-72">
+              <Search className="w-4 h-4 text-[#64748B] absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Buscar aluno…"
+                aria-label="Buscar aluno"
+                className="w-full pl-9 pr-3 py-2 text-xs bg-white dark:bg-[#141F19] border border-[#E5EAE7] dark:border-[#263730] rounded-lg"
+              />
+            </div>
+            <div className="flex flex-wrap gap-1.5 text-[11px] font-semibold">
+              <span className={`px-2 py-1 rounded-full ${MARK_STYLE.P}`}>Presenças {totals.P}</span>
+              <span className={`px-2 py-1 rounded-full ${MARK_STYLE.C}`}>Compensações {totals.C}</span>
+              <span className={`px-2 py-1 rounded-full ${MARK_STYLE.F}`}>Faltas {totals.F}</span>
+            </div>
+          </div>
+
+          {filtered.length === 0 ? (
+            <div className="p-10 text-center rounded-xl border border-dashed border-[#E5EAE7] dark:border-[#263730] text-sm text-[#64748B]">
+              Nenhum aluno encontrado.
+            </div>
+          ) : (
+            <>
+              {/* phones: cards */}
+              <ul className="md:hidden space-y-2">
+                {filtered.map((s) => (
+                  <li key={s.patient.id}>
+                    <button
+                      onClick={() => setSelectedId(s.patient.id)}
+                      className="w-full text-left p-3 rounded-xl border border-[#E5EAE7] dark:border-[#263730] bg-white dark:bg-[#141F19] space-y-2"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-semibold text-sm">{s.patient.name}</span>
+                        <span className="text-[11px] text-[#64748B]">sessão {s.cyclePos}/30</span>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5 text-[11px] font-semibold">
+                        <span className={`px-2 py-0.5 rounded-full ${MARK_STYLE.P}`}>P {s.P}</span>
+                        <span className={`px-2 py-0.5 rounded-full ${MARK_STYLE.C}`}>C {s.C}</span>
+                        <span className={`px-2 py-0.5 rounded-full ${MARK_STYLE.F}`}>F {s.F}</span>
+                        <span className="px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+                          {s.patient.sessionsRemaining} restantes
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-[#64748B]">Última presença: {s.last ? formatDate(s.last) : '—'}</p>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+
+              {/* larger screens: table */}
+              <div className="hidden md:block overflow-x-auto rounded-xl border border-[#E5EAE7] dark:border-[#263730] bg-white dark:bg-[#141F19]">
+                <table className="w-full text-xs">
+                  <thead className="bg-[#F8FAF9] dark:bg-[#111A15] text-[#64748B] uppercase tracking-wider text-[10px]">
+                    <tr>
+                      <th className="text-left px-4 py-3">Aluno</th>
+                      <th className="px-3 py-3">P</th>
+                      <th className="px-3 py-3">C</th>
+                      <th className="px-3 py-3">Faltas</th>
+                      <th className="px-3 py-3">Sessão no ciclo</th>
+                      <th className="px-3 py-3">Última presença</th>
+                      <th className="px-3 py-3">Restantes no plano</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[#E5EAE7] dark:divide-[#263730]">
+                    {filtered.map((s) => (
+                      <tr
+                        key={s.patient.id}
+                        onClick={() => setSelectedId(s.patient.id)}
+                        onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), setSelectedId(s.patient.id))}
+                        tabIndex={0}
+                        className="cursor-pointer hover:bg-[#F8FAF9] dark:hover:bg-[#1F332A] focus:outline-none focus:bg-[#E9F1EC] dark:focus:bg-[#1F332A]"
+                      >
+                        <td className="px-4 py-2.5 font-semibold">{s.patient.name}</td>
+                        <td className="px-3 py-2.5 text-center">
+                          <span className={`px-2 py-0.5 rounded-full font-bold ${MARK_STYLE.P}`}>{s.P}</span>
+                        </td>
+                        <td className="px-3 py-2.5 text-center">
+                          <span className={`px-2 py-0.5 rounded-full font-bold ${MARK_STYLE.C}`}>{s.C}</span>
+                        </td>
+                        <td className="px-3 py-2.5 text-center">
+                          <span className={`px-2 py-0.5 rounded-full font-bold ${MARK_STYLE.F}`}>{s.F}</span>
+                        </td>
+                        <td className="px-3 py-2.5 text-center font-mono">{s.cyclePos}/30</td>
+                        <td className="px-3 py-2.5 text-center font-mono">{s.last ? formatDate(s.last) : '—'}</td>
+                        <td className="px-3 py-2.5 text-center">{s.patient.sessionsRemaining}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </>
+      )}
     </div>
   );
 };
