@@ -15,6 +15,7 @@ import { BirthdaysView } from './components/views/BirthdaysView';
 import { ReportsView } from './components/views/ReportsView';
 import { ProfessionalsView } from './components/views/ProfessionalsView';
 import { SettingsView } from './components/views/SettingsView';
+import { PlansView } from './components/views/PlansView';
 import { PatientPortalView } from './components/views/PatientPortalView';
 import { CloudGate } from './components/auth/CloudGate';
 import { isCloudEnabled } from './lib/cloud';
@@ -28,7 +29,7 @@ import { UserRole } from './types';
 
 const SECTIONS = [
   'overview', 'schedule', 'patients', 'attendance', 'exercises', 'planning',
-  'records', 'financial', 'birthdays', 'reports', 'professionals', 'settings', 'tutorial',
+  'records', 'financial', 'plans', 'birthdays', 'reports', 'professionals', 'settings', 'tutorial',
 ];
 
 /** Section from the URL hash (#/exercises) so the browser back button and direct links work */
@@ -182,7 +183,9 @@ function ClinicApp() {
       case 'professionals':
         return <ProfessionalsView />;
       case 'settings':
-        return <SettingsView />;
+        return <SettingsView onNavigate={(s) => handleNavigate(s)} />;
+      case 'plans':
+        return <PlansView />;
       case 'tutorial':
         return <TutorialView onNavigate={(s) => handleNavigate(s)} />;
       default:

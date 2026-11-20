@@ -16,6 +16,7 @@ import {
   ChevronRight,
   Sparkles,
   BookOpen,
+  CreditCard,
 } from 'lucide-react';
 import { clinicStorage } from '../../lib/storage';
 import { getBirthdayAlerts, canAccessSection } from '../../lib/utils';
@@ -67,6 +68,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'planning', label: 'Planejamento', icon: ClipboardList },
     { id: 'records', label: 'Prontuários', icon: FileText },
     { id: 'financial', label: 'Financeiro', icon: DollarSign },
+    { id: 'plans', label: 'Planos e Áreas', icon: CreditCard },
     { id: 'birthdays', label: 'Aniversariantes', icon: Cake, badge: birthdayCount > 0 ? birthdayCount : undefined },
     { id: 'reports', label: 'Relatórios', icon: BarChart3 },
     { id: 'professionals', label: 'Profissionais', icon: UserCheck },

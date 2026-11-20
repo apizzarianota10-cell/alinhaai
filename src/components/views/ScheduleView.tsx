@@ -14,6 +14,8 @@ import {
   CheckCircle2,
   CalendarDays,
   Filter,
+  Users,
+  Minus,
 } from 'lucide-react';
 import {
   format,
@@ -30,7 +32,14 @@ import {
 } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { clinicStorage } from '../../lib/storage';
-import { checkScheduleConflict, formatDate, STATUS_LABELS } from '../../lib/utils';
+import {
+  checkScheduleConflict,
+  describeScheduleConflict,
+  formatDate,
+  getClassInfo,
+  isGroupModality,
+  STATUS_LABELS,
+} from '../../lib/utils';
 import { Appointment, Patient, Professional, AppointmentStatus } from '../../types';
 import { Modal } from '../common/Modal';
 import { useToast } from '../common/Toast';
@@ -46,7 +55,10 @@ export const ScheduleView: React.FC<ScheduleViewProps> = ({ onNavigate, initialA
   const [patients, setPatients] = useState<Patient[]>([]);
   const [professionals, setProfessionals] = useState<Professional[]>([]);
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
-  const [viewMode, setViewMode] = useState<'day' | 'week' | 'month'>('week');
+  // phones open on the day view: the 7-column week grid needs sideways scrolling there
+  const [viewMode, setViewMode] = useState<'day' | 'week' | 'month'>(() =>
+    typeof window !== 'undefined' && window.innerWidth < 640 ? 'day' : 'week'
+  );
   const [filterProfessionalId, setFilterProfessionalId] = useState<string>('all');
   const [filterModality, setFilterModality] = useState<string>('all');
 
@@ -69,8 +81,33 @@ export const ScheduleView: React.FC<ScheduleViewProps> = ({ onNavigate, initialA
   const [formIsRecurrent, setFormIsRecurrent] = useState(false);
   const [formRecurrenceRule, setFormRecurrenceRule] = useState<'weekly_1x' | 'weekly_2x' | 'weekly_3x'>('weekly_2x');
   const [formConflictError, setFormConflictError] = useState<string | null>(null);
+  // Pilates classes: students per slot and the students being booked together
+  const [formCapacity, setFormCapacity] = useState(1);
+  const [formPatientIds, setFormPatientIds] = useState<string[]>([]);
+  const [studentToAdd, setStudentToAdd] = useState('');
 
   const [settings, setSettings] = useState(clinicStorage.getSettings());
+
+  // new bookings in a group modality pick several students; editing keeps one booking = one student
+  const isGroupMode = !selectedAppointment && isGroupModality(formModality);
+  const formSlot = {
+    professionalId: formProfessionalId,
+    date: formDate,
+    startTime: formStartTime,
+    durationMinutes: formDuration,
+    modality: formModality,
+  };
+  const formClass = getClassInfo(appointments, formSlot, selectedAppointment?.id);
+  const formStudentsBooking = isGroupMode ? formPatientIds.length : 1;
+  const formFreeSpots = formCapacity - formClass.students.length - formStudentsBooking;
+
+  // picking a slot that already holds a class adopts that class's capacity
+  useEffect(() => {
+    if (!isModalOpen || selectedAppointment || !isGroupModality(formModality)) return;
+    const info = getClassInfo(appointments, formSlot);
+    if (info.students.length > 0) setFormCapacity((prev) => Math.max(prev, info.capacity));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isModalOpen, formProfessionalId, formDate, formStartTime, formDuration, formModality]);
 
   useEffect(() => {
     const load = () => {
@@ -107,15 +144,22 @@ export const ScheduleView: React.FC<ScheduleViewProps> = ({ onNavigate, initialA
     return true;
   });
 
-  function handleOpenNewModal(dateStr?: string, timeStr?: string) {
+  /** `classOf` pre-fills the slot of an existing class to add more students to it */
+  function handleOpenNewModal(dateStr?: string, timeStr?: string, classOf?: Appointment) {
     setSelectedAppointment(null);
     setFormDate(dateStr || format(selectedDate, 'yyyy-MM-dd'));
     setFormStartTime(timeStr || '08:00');
-    setFormDuration(clinicStorage.getSettings().defaultSessionDurationMinutes || 50);
+    setFormDuration(classOf?.durationMinutes || clinicStorage.getSettings().defaultSessionDurationMinutes || 50);
     setFormNotes('');
     setFormIsRecurrent(false);
     setFormConflictError(null);
-    if (filterProfessionalId !== 'all') setFormProfessionalId(filterProfessionalId);
+    setFormPatientIds([]);
+    setStudentToAdd('');
+    setFormCapacity(classOf?.capacity || 1);
+    if (classOf) {
+      setFormProfessionalId(classOf.professionalId);
+      setFormModality(classOf.modality);
+    } else if (filterProfessionalId !== 'all') setFormProfessionalId(filterProfessionalId);
     setIsModalOpen(true);
   }
 
@@ -129,6 +173,7 @@ export const ScheduleView: React.FC<ScheduleViewProps> = ({ onNavigate, initialA
     setFormDuration(appt.durationMinutes);
     setFormNotes(appt.notes || '');
     setFormIsRecurrent(appt.isRecurrent);
+    setFormCapacity(getClassInfo(appointments, appt).capacity);
     setFormConflictError(null);
     setAppointmentDetailModal(null);
     setIsModalOpen(true);
@@ -139,14 +184,14 @@ export const ScheduleView: React.FC<ScheduleViewProps> = ({ onNavigate, initialA
     setFormConflictError(null);
 
     // Editing may keep a patient/professional that is no longer in the "active" lists
-    const patient =
-      patients.find((p) => p.id === formPatientId) || clinicStorage.getPatientById(formPatientId);
+    const findPatient = (id: string) => patients.find((p) => p.id === id) || clinicStorage.getPatientById(id);
+    const students = (isGroupMode ? formPatientIds : [formPatientId]).map(findPatient).filter((p): p is Patient => !!p);
     const professional =
       professionals.find((p) => p.id === formProfessionalId) ||
       clinicStorage.getProfessionals().find((p) => p.id === formProfessionalId);
 
-    if (!patient || !professional) {
-      showToast('Selecione paciente e profissional válidos', 'error');
+    if (students.length === 0 || !professional) {
+      showToast(isGroupMode ? 'Adicione pelo menos 1 aluno.' : 'Selecione paciente e profissional válidos', 'error');
       return;
     }
     if (!formDuration || formDuration < 10) {
@@ -154,92 +199,115 @@ export const ScheduleView: React.FC<ScheduleViewProps> = ({ onNavigate, initialA
       return;
     }
 
-    // Server-level Conflict detection rule
-    const conflictResult = checkScheduleConflict(appointments, {
-      id: selectedAppointment?.id,
-      professionalId: formProfessionalId,
-      date: formDate,
-      startTime: formStartTime,
-      durationMinutes: formDuration,
-    });
+    const groupClass = isGroupModality(formModality);
+    const capacity = groupClass ? Math.max(1, formCapacity || 1) : undefined;
+    const slotCheck = (existing: Appointment[], date: string, patientId: string, id?: string) =>
+      checkScheduleConflict(existing, {
+        id,
+        professionalId: professional.id,
+        date,
+        startTime: formStartTime,
+        durationMinutes: formDuration,
+        modality: formModality,
+        patientId,
+        capacity,
+      });
 
-    if (conflictResult.hasConflict) {
-      setFormConflictError(
-        `Conflito de horário detectado! O profissional ${professional.name} já possui o atendimento de ${conflictResult.conflictingWith?.patientName} às ${conflictResult.conflictingWith?.startTime}.`
-      );
-      return;
+    // Validate every student on the chosen date before saving anything
+    let existing = clinicStorage.getAppointments();
+    const pending: Appointment[] = [];
+    for (const student of students) {
+      const conflict = slotCheck([...existing, ...pending], formDate, student.id, selectedAppointment?.id);
+      if (conflict.hasConflict) {
+        setFormConflictError(describeScheduleConflict(conflict, professional.name, student.name));
+        return;
+      }
+      // placeholder so the next student counts this one as a classmate
+      pending.push({
+        ...formSlot,
+        id: `pending-${student.id}`,
+        patientId: student.id,
+        patientName: student.name,
+        professionalName: professional.name,
+        endTime: '',
+        status: 'agendado',
+        isRecurrent: false,
+        capacity,
+      });
     }
 
     // Calculate end time
     const [h, m] = formStartTime.split(':').map(Number);
     const totalMinutes = h * 60 + m + formDuration;
-    const endH = String(Math.floor(totalMinutes / 60)).padStart(2, '0');
-    const endM = String(totalMinutes % 60).padStart(2, '0');
-    const endTime = `${endH}:${endM}`;
+    const endTime = `${String(Math.floor(totalMinutes / 60)).padStart(2, '0')}:${String(totalMinutes % 60).padStart(2, '0')}`;
 
-    const apptData: Appointment = {
-      id: selectedAppointment ? selectedAppointment.id : `apt-${Date.now()}`,
-      patientId: patient.id,
-      patientName: patient.name,
-      professionalId: professional.id,
-      professionalName: professional.name,
-      modality: formModality,
-      date: formDate,
-      startTime: formStartTime,
-      endTime,
-      durationMinutes: formDuration,
-      status: selectedAppointment ? selectedAppointment.status : 'agendado',
-      isRecurrent: formIsRecurrent,
-      recurrenceRule: formIsRecurrent ? formRecurrenceRule : undefined,
-      notes: formNotes,
-    };
+    const baseId = Date.now();
+    const skipped = new Set<string>();
+    let created = 0;
 
-    clinicStorage.saveAppointment(apptData);
+    students.forEach((student, i) => {
+      const apptData: Appointment = {
+        id: selectedAppointment ? selectedAppointment.id : `apt-${baseId}-${i}`,
+        patientId: student.id,
+        patientName: student.name,
+        professionalId: professional.id,
+        professionalName: professional.name,
+        modality: formModality,
+        date: formDate,
+        startTime: formStartTime,
+        endTime,
+        durationMinutes: formDuration,
+        capacity,
+        status: selectedAppointment ? selectedAppointment.status : 'agendado',
+        isRecurrent: formIsRecurrent,
+        recurrenceRule: formIsRecurrent ? formRecurrenceRule : undefined,
+        notes: formNotes,
+      };
+      clinicStorage.saveAppointment(apptData);
+      existing = [...existing.filter((a) => a.id !== apptData.id), apptData];
+      created++;
 
-    // Recurring series: 4 weeks following the chosen frequency.
-    // 1x = same weekday; 2x = chosen day + 2 days later; 3x = chosen day + 2 + 4 days later (Sundays skipped).
-    if (!selectedAppointment && formIsRecurrent) {
-      const baseDate = parseISO(formDate);
-      const offsetsPerWeek = formRecurrenceRule === 'weekly_3x' ? [0, 2, 4] : formRecurrenceRule === 'weekly_2x' ? [0, 2] : [0];
-      let created = 0;
-      const skipped: string[] = [];
-      let existing = clinicStorage.getAppointments();
-      for (let w = 0; w < 4; w++) {
-        for (const off of offsetsPerWeek) {
-          if (w === 0 && off === 0) continue; // the base appointment already saved above
-          let next = addDays(baseDate, w * 7 + off);
-          if (next.getDay() === 0) next = addDays(next, 1);
-          const nextDateStr = format(next, 'yyyy-MM-dd');
-          const conflict = checkScheduleConflict(existing, {
-            professionalId: professional.id,
-            date: nextDateStr,
-            startTime: formStartTime,
-            durationMinutes: formDuration,
-          });
-          if (conflict.hasConflict) {
-            skipped.push(formatDate(nextDateStr, 'dd/MM'));
-            continue;
+      // Recurring series: 4 weeks following the chosen frequency.
+      // 1x = same weekday; 2x = chosen day + 2 days later; 3x = chosen day + 2 + 4 days later (Sundays skipped).
+      if (!selectedAppointment && formIsRecurrent) {
+        const baseDate = parseISO(formDate);
+        const offsetsPerWeek = formRecurrenceRule === 'weekly_3x' ? [0, 2, 4] : formRecurrenceRule === 'weekly_2x' ? [0, 2] : [0];
+        for (let w = 0; w < 4; w++) {
+          for (const off of offsetsPerWeek) {
+            if (w === 0 && off === 0) continue; // the base appointment already saved above
+            let next = addDays(baseDate, w * 7 + off);
+            if (next.getDay() === 0) next = addDays(next, 1);
+            const nextDateStr = format(next, 'yyyy-MM-dd');
+            if (slotCheck(existing, nextDateStr, student.id).hasConflict) {
+              skipped.add(`${formatDate(nextDateStr, 'dd/MM')}${students.length > 1 ? ` (${student.name.split(' ')[0]})` : ''}`);
+              continue;
+            }
+            const occurrence: Appointment = {
+              ...apptData,
+              id: `apt-${baseId}-${i}-${w}-${off}`,
+              date: nextDateStr,
+              recurrenceId: apptData.id,
+            };
+            clinicStorage.saveAppointment(occurrence);
+            existing = [...existing, occurrence];
+            created++;
           }
-          const occurrence: Appointment = {
-            ...apptData,
-            id: `apt-${Date.now()}-${w}-${off}`,
-            date: nextDateStr,
-            recurrenceId: apptData.id,
-          };
-          clinicStorage.saveAppointment(occurrence);
-          existing = [...existing, occurrence];
-          created++;
         }
       }
-      showToast(
-        skipped.length
-          ? `Série criada com ${created + 1} sessões. Datas com conflito ignoradas: ${skipped.join(', ')}.`
-          : `Série recorrente criada com ${created + 1} sessões!`,
-        skipped.length ? 'info' : 'success'
-      );
-    } else {
-      showToast(selectedAppointment ? 'Agendamento atualizado!' : 'Agendamento criado com sucesso!', 'success');
+    });
+
+    // keep the whole class on the same capacity
+    if (groupClass) {
+      getClassInfo(existing, formSlot)
+        .students.filter((a) => (a.capacity || 1) !== capacity)
+        .forEach((a) => clinicStorage.saveAppointment({ ...a, capacity }));
     }
+
+    const who = students.length > 1 ? `${students.length} alunos` : students[0].name;
+    if (selectedAppointment) showToast('Agendamento atualizado!', 'success');
+    else if (skipped.size)
+      showToast(`${created} sessões criadas para ${who}. Datas com conflito ou turma cheia ignoradas: ${[...skipped].join(', ')}.`, 'info');
+    else showToast(formIsRecurrent ? `Série criada: ${created} sessões para ${who}!` : `Agendamento criado para ${who}!`, 'success');
     setIsModalOpen(false);
   };
 
@@ -334,9 +402,12 @@ export const ScheduleView: React.FC<ScheduleViewProps> = ({ onNavigate, initialA
       date: repDate,
       startTime: repTime,
       durationMinutes: replacementFor.durationMinutes,
+      // a Pilates make-up session may join a class with free spots
+      modality: replacementFor.modality,
+      patientId: replacementFor.patientId,
     });
     if (conflict.hasConflict) {
-      setRepError(`Conflito: ${professional.name} já atende ${conflict.conflictingWith?.patientName} às ${conflict.conflictingWith?.startTime}.`);
+      setRepError(describeScheduleConflict(conflict, professional.name, replacementFor.patientName));
       return;
     }
     const [h, m] = repTime.split(':').map(Number);
@@ -350,6 +421,8 @@ export const ScheduleView: React.FC<ScheduleViewProps> = ({ onNavigate, initialA
       startTime: repTime,
       endTime: `${String(Math.floor(endMin / 60)).padStart(2, '0')}:${String(endMin % 60).padStart(2, '0')}`,
       status: 'agendado',
+      // joins the target slot as-is: a class keeps its own capacity, an empty slot is individual
+      capacity: undefined,
       isRecurrent: false,
       recurrenceId: undefined,
       recurrenceRule: undefined,
@@ -377,16 +450,57 @@ export const ScheduleView: React.FC<ScheduleViewProps> = ({ onNavigate, initialA
 
   const isStartable = (a: Appointment) => a.status === 'agendado' || a.status === 'confirmado';
 
+  /** "+ aluno (2/4)" buttons for each class in a calendar cell that still has free spots */
+  const renderClassButtons = (cellAppts: Appointment[], dayStr: string, compact: boolean) => {
+    const seen = new Set<string>();
+    return cellAppts
+      .filter((a) => isGroupModality(a.modality) && a.status !== 'cancelado' && a.status !== 'reagendado')
+      .filter((a) => {
+        const key = `${a.professionalId}|${a.startTime}|${a.durationMinutes}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .map((cls) => {
+        const info = getClassInfo(appointments, cls);
+        const free = info.capacity - info.students.length;
+        const label = `${info.students.length}/${info.capacity}`;
+        return free > 0 ? (
+          <button
+            key={`${cls.professionalId}-${cls.startTime}`}
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              handleOpenNewModal(dayStr, cls.startTime, cls);
+            }}
+            title={`Adicionar aluno à turma das ${cls.startTime}`}
+            className={`w-full flex items-center justify-center gap-1 rounded-md border border-dashed border-[#426B5B]/50 text-[#426B5B] dark:text-[#7FB39F] hover:bg-[#E9F1EC] dark:hover:bg-[#1F332A] font-semibold ${
+              compact ? 'text-[10px] py-1' : 'text-xs py-2 mt-2'
+            }`}
+          >
+            <Plus className="w-3 h-3" /> aluno ({label})
+          </button>
+        ) : info.capacity > 1 ? (
+          <span
+            key={`${cls.professionalId}-${cls.startTime}`}
+            className={`block text-center font-semibold text-rose-600 dark:text-rose-400 ${compact ? 'text-[10px]' : 'text-xs mt-2'}`}
+          >
+            Turma cheia ({label})
+          </span>
+        ) : null;
+      });
+  };
+
   return (
     <div className="space-y-4">
       {/* Top Header & Calendar Controls */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
           <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-[#17231D] dark:text-[#F1F5F3]">
-            Agenda de Atendimentos Individuais
+            Agenda de Atendimentos
           </h1>
           <p className="text-xs sm:text-sm text-[#64748B] dark:text-[#94A3B8]">
-            Organização individual por profissional com prevenção ativa de sobreposição de horários.
+            Aulas individuais e turmas de Pilates por profissional, com controle de vagas e de conflitos de horário.
           </p>
         </div>
 
@@ -416,10 +530,11 @@ export const ScheduleView: React.FC<ScheduleViewProps> = ({ onNavigate, initialA
               className="bg-transparent border-0 text-[#17231D] dark:text-[#F1F5F3] focus:ring-0 cursor-pointer font-medium"
             >
               <option value="all" className="dark:bg-[#17231D]">Todas as Modalidades</option>
-              <option value="Pilates" className="dark:bg-[#17231D]">Pilates</option>
-              <option value="Fisioterapia" className="dark:bg-[#17231D]">Fisioterapia</option>
-              <option value="Quiropraxia" className="dark:bg-[#17231D]">Quiropraxia</option>
-              <option value="Reabilitação" className="dark:bg-[#17231D]">Reabilitação</option>
+              {(settings.serviceAreas || []).map((a) => (
+                <option key={a.id} value={a.name} className="dark:bg-[#17231D]">
+                  {a.name}
+                </option>
+              ))}
             </select>
           </div>
 
@@ -619,6 +734,7 @@ export const ScheduleView: React.FC<ScheduleViewProps> = ({ onNavigate, initialA
                               </div>
                             </div>
                           ))}
+                          {renderClassButtons(matchAppts, dayStr, true)}
                         </div>
                       );
                     })}
@@ -647,6 +763,7 @@ export const ScheduleView: React.FC<ScheduleViewProps> = ({ onNavigate, initialA
                   </span>
                   <div className="flex-1">
                     {match.length > 0 ? (
+                      <>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                         {match.map((appt) => (
                           <div
@@ -693,7 +810,9 @@ export const ScheduleView: React.FC<ScheduleViewProps> = ({ onNavigate, initialA
                             )}
                           </div>
                         ))}
-                      </div>
+                        </div>
+                        {renderClassButtons(match, dayStr, false)}
+                      </>
                     ) : (
                       <button
                         onClick={() => handleOpenNewModal(dayStr, time)}
@@ -915,7 +1034,7 @@ export const ScheduleView: React.FC<ScheduleViewProps> = ({ onNavigate, initialA
         <Modal
           isOpen={true}
           onClose={() => setIsModalOpen(false)}
-          title={selectedAppointment ? 'Editar Agendamento' : 'Novo Agendamento Individual'}
+          title={selectedAppointment ? 'Editar Agendamento' : 'Novo Agendamento'}
           description="Validação de conflitos de horário com o profissional."
         >
           <form onSubmit={handleSaveAppointment} className="space-y-4">
@@ -925,24 +1044,6 @@ export const ScheduleView: React.FC<ScheduleViewProps> = ({ onNavigate, initialA
                 <span>{formConflictError}</span>
               </div>
             )}
-
-            <div>
-              <label className="block text-xs font-semibold text-[#17231D] dark:text-[#F1F5F3] mb-1">
-                Paciente
-              </label>
-              <select
-                value={formPatientId}
-                onChange={(e) => setFormPatientId(e.target.value)}
-                className="w-full px-3 py-2 text-xs sm:text-sm bg-[#F8FAF9] dark:bg-[#111A15] border border-[#E5EAE7] dark:border-[#273830] rounded-lg text-[#17231D] dark:text-[#F1F5F3]"
-                required
-              >
-                {patients.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name} ({p.sessionsRemaining} sessões restantes)
-                  </option>
-                ))}
-              </select>
-            </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
@@ -969,16 +1070,168 @@ export const ScheduleView: React.FC<ScheduleViewProps> = ({ onNavigate, initialA
                 </label>
                 <select
                   value={formModality}
-                  onChange={(e) => setFormModality(e.target.value)}
+                  onChange={(e) => {
+                    setFormModality(e.target.value);
+                    // new class bookings start from the area's suggested students per slot
+                    const area = settings.serviceAreas?.find((a) => a.name === e.target.value);
+                    if (!selectedAppointment && area?.allowsGroups) setFormCapacity(area.defaultCapacity || 1);
+                  }}
                   className="w-full px-3 py-2 text-xs sm:text-sm bg-[#F8FAF9] dark:bg-[#111A15] border border-[#E5EAE7] dark:border-[#273830] rounded-lg text-[#17231D] dark:text-[#F1F5F3]"
                 >
-                  <option value="Pilates">Pilates Clínico Individual</option>
-                  <option value="Fisioterapia">Fisioterapia Traumato-Ortopédica</option>
-                  <option value="Quiropraxia">Quiropraxia & Ajuste Postural</option>
-                  <option value="Reabilitação">Reabilitação de Coluna</option>
+                  {(settings.serviceAreas || [])
+                    .filter((a) => a.active || a.name === formModality)
+                    .map((a) => (
+                      <option key={a.id} value={a.name}>
+                        {a.name}
+                        {a.allowsGroups ? ' (individual ou turma)' : ''}
+                      </option>
+                    ))}
+                  {/* editing a booking whose area was renamed/removed keeps its original modality */}
+                  {!settings.serviceAreas?.some((a) => a.name === formModality) && (
+                    <option value={formModality}>{formModality}</option>
+                  )}
                 </select>
               </div>
             </div>
+
+            {/* Students per slot (Pilates classes) */}
+            {isGroupModality(formModality) && (
+              <div className="p-3 rounded-lg border border-[#E5EAE7] dark:border-[#273830] bg-[#F8FAF9] dark:bg-[#111A15] flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <Users className="w-4 h-4 text-[#426B5B] dark:text-[#7FB39F]" />
+                  <div>
+                    <span className="block text-xs font-semibold text-[#17231D] dark:text-[#F1F5F3]">Alunos por horário</span>
+                    <span className="block text-[11px] text-[#64748B]">
+                      {formCapacity === 1 ? 'Aula individual' : `Turma de até ${formCapacity} alunos`}
+                      {formClass.students.length > 0 && ` • ${formClass.students.length} já agendado(s)`}
+                    </span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    aria-label="Diminuir alunos por horário"
+                    onClick={() => setFormCapacity((c) => Math.max(1, c - 1))}
+                    className="w-10 h-10 sm:w-8 sm:h-8 flex items-center justify-center rounded-lg border border-[#E5EAE7] dark:border-[#273830] bg-white dark:bg-[#17231D]"
+                  >
+                    <Minus className="w-4 h-4" />
+                  </button>
+                  <input
+                    type="number"
+                    inputMode="numeric"
+                    min={1}
+                    max={20}
+                    aria-label="Alunos por horário"
+                    value={formCapacity}
+                    onChange={(e) => setFormCapacity(Math.min(20, Math.max(1, Number(e.target.value) || 1)))}
+                    className="w-14 h-10 sm:h-8 text-center text-sm font-bold bg-white dark:bg-[#17231D] border border-[#E5EAE7] dark:border-[#273830] rounded-lg"
+                  />
+                  <button
+                    type="button"
+                    aria-label="Aumentar alunos por horário"
+                    onClick={() => setFormCapacity((c) => Math.min(20, c + 1))}
+                    className="w-10 h-10 sm:w-8 sm:h-8 flex items-center justify-center rounded-lg border border-[#E5EAE7] dark:border-[#273830] bg-white dark:bg-[#17231D]"
+                  >
+                    <Plus className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Patient(s) */}
+            {isGroupMode ? (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-semibold text-[#17231D] dark:text-[#F1F5F3]">Alunos</label>
+                  <span className={`text-[11px] font-semibold ${formFreeSpots < 0 ? 'text-rose-600' : 'text-[#64748B]'}`}>
+                    {formFreeSpots < 0
+                      ? `${-formFreeSpots} acima do limite`
+                      : `${formFreeSpots} vaga${formFreeSpots === 1 ? '' : 's'} livre${formFreeSpots === 1 ? '' : 's'}`}
+                  </span>
+                </div>
+
+                {formClass.students.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {formClass.students.map((s) => (
+                      <span key={s.id} className="px-2 py-1 rounded-full text-[11px] bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+                        {s.patientName} • já na turma
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                {formPatientIds.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {formPatientIds.map((id) => {
+                      const p = patients.find((x) => x.id === id);
+                      return (
+                        <span key={id} className="flex items-center gap-1 pl-2.5 pr-1 py-1 rounded-full text-xs font-medium bg-[#E9F1EC] dark:bg-[#1F332A] text-[#345648] dark:text-[#9CCBB8]">
+                          {p?.name || id}
+                          <button
+                            type="button"
+                            aria-label={`Remover ${p?.name || 'aluno'}`}
+                            onClick={() => setFormPatientIds((ids) => ids.filter((x) => x !== id))}
+                            className="p-1 rounded-full hover:bg-black/10"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </span>
+                      );
+                    })}
+                  </div>
+                )}
+
+                <div className="flex gap-2">
+                  <select
+                    value={studentToAdd}
+                    onChange={(e) => setStudentToAdd(e.target.value)}
+                    aria-label="Aluno para adicionar"
+                    className="flex-1 min-w-0 px-3 py-2 text-xs sm:text-sm bg-[#F8FAF9] dark:bg-[#111A15] border border-[#E5EAE7] dark:border-[#273830] rounded-lg text-[#17231D] dark:text-[#F1F5F3]"
+                  >
+                    <option value="">Selecione um aluno…</option>
+                    {patients
+                      .filter((p) => !formPatientIds.includes(p.id) && !formClass.students.some((s) => s.patientId === p.id))
+                      .map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name} ({p.sessionsRemaining} sessões restantes)
+                        </option>
+                      ))}
+                  </select>
+                  <button
+                    type="button"
+                    disabled={!studentToAdd || formFreeSpots <= 0}
+                    onClick={() => {
+                      setFormPatientIds((ids) => [...ids, studentToAdd]);
+                      setStudentToAdd('');
+                    }}
+                    className="shrink-0 flex items-center gap-1 px-3 py-2 text-xs font-semibold text-white bg-[#426B5B] hover:bg-[#345648] rounded-lg disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    <Plus className="w-3.5 h-3.5" /> Adicionar
+                  </button>
+                </div>
+                {formFreeSpots <= 0 && formPatientIds.length > 0 && (
+                  <p className="text-[11px] text-[#64748B]">Turma completa. Aumente "Alunos por horário" para incluir mais.</p>
+                )}
+              </div>
+            ) : (
+              <div>
+                <label className="block text-xs font-semibold text-[#17231D] dark:text-[#F1F5F3] mb-1">
+                  Paciente
+                </label>
+                <select
+                  value={formPatientId}
+                  onChange={(e) => setFormPatientId(e.target.value)}
+                  className="w-full px-3 py-2 text-xs sm:text-sm bg-[#F8FAF9] dark:bg-[#111A15] border border-[#E5EAE7] dark:border-[#273830] rounded-lg text-[#17231D] dark:text-[#F1F5F3]"
+                  required
+                >
+                  {patients.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} ({p.sessionsRemaining} sessões restantes)
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>

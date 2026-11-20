@@ -95,7 +95,7 @@ export const PatientsView: React.FC<PatientsViewProps> = ({
   const [formState, setFormState] = useState('PE');
   const [formEmergencyName, setFormEmergencyName] = useState('');
   const [formEmergencyPhone, setFormEmergencyPhone] = useState('');
-  const [formModality, setFormModality] = useState<'Pilates' | 'Fisioterapia' | 'Quiropraxia' | 'Reabilitação'>('Pilates');
+  const [formModality, setFormModality] = useState<string>('Pilates');
   const [formResponsibleProfId, setFormResponsibleProfId] = useState('');
   const [formPlanId, setFormPlanId] = useState('');
   const [formAdminNotes, setFormAdminNotes] = useState('');
@@ -1220,13 +1220,17 @@ export const PatientsView: React.FC<PatientsViewProps> = ({
                 <label className="block text-xs font-semibold mb-1">Modalidade Inicial</label>
                 <select
                   value={formModality}
-                  onChange={(e) => setFormModality(e.target.value as any)}
+                  onChange={(e) => setFormModality(e.target.value)}
                   className="w-full px-3 py-2 text-xs bg-[#F8FAF9] dark:bg-[#111A15] border border-[#E5EAE7] dark:border-[#273830] rounded-lg"
                 >
-                  <option value="Pilates">Pilates Clínico Individual</option>
-                  <option value="Fisioterapia">Fisioterapia</option>
-                  <option value="Quiropraxia">Quiropraxia</option>
-                  <option value="Reabilitação">Reabilitação de Coluna</option>
+                  {clinicStorage
+                    .getServiceAreas()
+                    .filter((a) => a.active || a.name === formModality)
+                    .map((a) => (
+                      <option key={a.id} value={a.name}>
+                        {a.name}
+                      </option>
+                    ))}
                 </select>
               </div>
 

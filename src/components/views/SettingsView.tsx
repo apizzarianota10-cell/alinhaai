@@ -16,32 +16,19 @@ import {
 import { format } from 'date-fns';
 import { isCloudSession } from '../../lib/demo';
 import { clinicStorage } from '../../lib/storage';
-import { ClinicSettings, Plan } from '../../types';
-import { formatCurrency, parseBRLToCents } from '../../lib/utils';
+import { ClinicSettings } from '../../types';
 import { Modal } from '../common/Modal';
 import { useToast } from '../common/Toast';
 
-export const SettingsView: React.FC = () => {
+export const SettingsView: React.FC<{ onNavigate?: (section: string) => void }> = ({ onNavigate }) => {
   const { showToast } = useToast();
   const [settings, setSettings] = useState<ClinicSettings>(clinicStorage.getSettings());
-  const [plans, setPlans] = useState<Plan[]>(clinicStorage.getPlans());
-
-  // Plan editing modal
-  const [editingPlan, setEditingPlan] = useState<Plan | null>(null);
-  const [isPlanModalOpen, setIsPlanModalOpen] = useState(false);
-  const [planName, setPlanName] = useState('');
-  const [planPriceReais, setPlanPriceReais] = useState('420,00');
-  const [planSessions, setPlanSessions] = useState(8);
-  const [planFrequency, setPlanFrequency] = useState(2);
-  const [planValidityDays, setPlanValidityDays] = useState(30);
-  const [planDescription, setPlanDescription] = useState('');
   const [isResetConfirmModalOpen, setIsResetConfirmModalOpen] = useState(false);
 
   useEffect(() => {
     const load = () => {
-      // Keep unsaved form edits; only follow the theme (header toggle) and the plans list
+      // Keep unsaved form edits; only follow the theme (header toggle)
       setSettings((prev) => ({ ...prev, theme: clinicStorage.getSettings().theme }));
-      setPlans(clinicStorage.getPlans());
     };
     load();
     return clinicStorage.subscribe(load);
@@ -57,7 +44,9 @@ export const SettingsView: React.FC = () => {
       showToast('A duração padrão da sessão deve ter pelo menos 10 minutos.', 'error');
       return;
     }
-    clinicStorage.saveSettings({ ...settings, theme: clinicStorage.getSettings().theme });
+    // theme and service areas are edited elsewhere: keep their latest stored values
+    const current = clinicStorage.getSettings();
+    clinicStorage.saveSettings({ ...settings, theme: current.theme, serviceAreas: current.serviceAreas });
     showToast('Configurações da clínica atualizadas com sucesso!', 'success');
   };
 
@@ -111,11 +100,6 @@ export const SettingsView: React.FC = () => {
     setPendingRestore(null);
   };
 
-  const handleTogglePlanActive = (pl: Plan) => {
-    clinicStorage.savePlan({ ...pl, active: !pl.active });
-    showToast(pl.active ? `Plano "${pl.name}" desativado para novas vendas.` : `Plano "${pl.name}" reativado.`, 'info');
-  };
-
   const handleResetDemoData = () => {
     setIsResetConfirmModalOpen(true);
   };
@@ -127,58 +111,6 @@ export const SettingsView: React.FC = () => {
     setIsResetConfirmModalOpen(false);
   };
 
-  const openNewPlan = () => {
-    setEditingPlan(null);
-    setPlanName('');
-    setPlanPriceReais('350,00');
-    setPlanSessions(8);
-    setPlanFrequency(2);
-    setPlanValidityDays(30);
-    setPlanDescription('Atendimento individual de Pilates');
-    setIsPlanModalOpen(true);
-  };
-
-  const openEditPlan = (pl: Plan) => {
-    setEditingPlan(pl);
-    setPlanName(pl.name);
-    setPlanPriceReais((pl.priceCents / 100).toFixed(2).replace('.', ','));
-    setPlanSessions(pl.sessionsCount);
-    setPlanFrequency(pl.frequencyPerWeek);
-    setPlanValidityDays(pl.validityDays);
-    setPlanDescription(pl.description);
-    setIsPlanModalOpen(true);
-  };
-
-  const handleSavePlan = (e: React.FormEvent) => {
-    e.preventDefault();
-    const priceCents = parseBRLToCents(planPriceReais);
-    if (!Number.isFinite(priceCents) || priceCents <= 0) {
-      showToast('Valor do plano inválido. Use o formato 350,00.', 'error');
-      return;
-    }
-    if (planSessions < 1 || planFrequency < 1 || planValidityDays < 1) {
-      showToast('Sessões, frequência e validade devem ser maiores que zero.', 'error');
-      return;
-    }
-
-    const planData: Plan = {
-      ...editingPlan,
-      id: editingPlan ? editingPlan.id : `plan-${Date.now()}`,
-      name: planName.trim(),
-      priceCents,
-      sessionsCount: planSessions,
-      frequencyPerWeek: planFrequency,
-      validityDays: planValidityDays,
-      durationMinutes: editingPlan?.durationMinutes || settings.defaultSessionDurationMinutes || 50,
-      replacementConditions: editingPlan?.replacementConditions || 'Até 2 reposições com aviso prévio.',
-      description: planDescription,
-      active: editingPlan ? editingPlan.active : true,
-    };
-
-    clinicStorage.savePlan(planData);
-    showToast('Plano salvo com sucesso!', 'success');
-    setIsPlanModalOpen(false);
-  };
 
   return (
     <div className="space-y-6">
@@ -413,65 +345,23 @@ export const SettingsView: React.FC = () => {
         </div>
       </form>
 
-      {/* Plans Management */}
-      <div className="bg-white dark:bg-[#17231D] border border-[#E5EAE7] dark:border-[#273830] rounded-2xl p-6 shadow-xs space-y-4">
-        <div className="flex items-center justify-between pb-3 border-b border-[#E5EAE7] dark:border-[#273830]">
-          <div className="flex items-center gap-2">
-            <CreditCard className="w-4 h-4 text-[#426B5B] dark:text-[#5A8E7A]" />
-            <h2 className="text-sm font-bold uppercase tracking-wider text-[#17231D] dark:text-[#F1F5F3]">
-              Planos e Mensalidades da Clínica
-            </h2>
+      {/* Plans moved to their own section */}
+      <div className="bg-white dark:bg-[#17231D] border border-[#E5EAE7] dark:border-[#273830] rounded-2xl p-6 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex items-start gap-2">
+          <CreditCard className="w-4 h-4 mt-0.5 text-[#426B5B] dark:text-[#5A8E7A]" />
+          <div>
+            <h2 className="text-sm font-bold uppercase tracking-wider text-[#17231D] dark:text-[#F1F5F3]">Planos e Áreas</h2>
+            <p className="text-xs text-[#64748B] dark:text-[#94A3B8]">
+              Planos, mensalidades e áreas de atendimento agora têm uma seção própria.
+            </p>
           </div>
-          <button
-            onClick={openNewPlan}
-            className="px-3 py-1.5 bg-[#426B5B] hover:bg-[#345648] text-white text-xs font-semibold rounded-lg flex items-center gap-1 shadow-xs"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>Novo Plano</span>
-          </button>
         </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          {plans.map((pl) => (
-            <div
-              key={pl.id}
-              className={`p-4 rounded-xl border border-[#E5EAE7] dark:border-[#273830] bg-[#F8FAF9] dark:bg-[#111A15] space-y-2 text-xs ${
-                pl.active ? '' : 'opacity-60'
-              }`}
-            >
-              <div className="flex items-start justify-between">
-                <div>
-                  <h4 className="font-bold text-sm text-[#17231D] dark:text-[#F1F5F3]">{pl.name}</h4>
-                  <p className="text-base font-extrabold text-[#426B5B] dark:text-[#5A8E7A]">
-                    {formatCurrency(pl.priceCents)}
-                  </p>
-                </div>
-                <div className="flex items-center gap-1">
-                  <button
-                    onClick={() => handleTogglePlanActive(pl)}
-                    className="px-2 py-1 bg-white dark:bg-[#17231D] border text-[11px] font-semibold rounded hover:bg-slate-50"
-                  >
-                    {pl.active ? 'Desativar' : 'Ativar'}
-                  </button>
-                  <button
-                    onClick={() => openEditPlan(pl)}
-                    className="px-2 py-1 bg-white dark:bg-[#17231D] border text-[11px] font-semibold rounded hover:bg-slate-50"
-                  >
-                    Editar
-                  </button>
-                </div>
-              </div>
-              <p className="text-[#64748B] text-[11px]">{pl.description}</p>
-              <div className="pt-2 border-t border-[#E5EAE7] dark:border-[#273830] flex justify-between text-[11px] text-[#64748B]">
-                <span>
-                  {pl.sessionsCount} {pl.sessionsCount === 1 ? 'sessão' : 'sessões'}
-                  {pl.frequencyPerWeek > 0 ? ` • ${pl.frequencyPerWeek}x/sem` : ''}
-                </span>
-                <span>Validade: {pl.validityDays} dias</span>
-              </div>
-            </div>
-          ))}
-        </div>
+        <button
+          onClick={() => onNavigate?.('plans')}
+          className="px-3 py-1.5 bg-[#426B5B] hover:bg-[#345648] text-white text-xs font-semibold rounded-lg shadow-xs self-start sm:self-auto"
+        >
+          Abrir Planos e Áreas
+        </button>
       </div>
 
       {/* Backup & Restore */}
@@ -529,107 +419,6 @@ export const SettingsView: React.FC = () => {
           <span>Restaurar Dados Demo</span>
         </button>
       </div>}
-
-      {/* PLAN MODAL */}
-      {isPlanModalOpen && (
-        <Modal
-          isOpen={true}
-          onClose={() => setIsPlanModalOpen(false)}
-          title={editingPlan ? 'Editar Plano' : 'Novo Plano da Clínica'}
-          description="Configure valores, quantidade de sessões e frequência."
-        >
-          <form onSubmit={handleSavePlan} className="space-y-4">
-            <div>
-              <label className="block text-xs font-semibold mb-1">Nome do Plano *</label>
-              <input
-                type="text"
-                placeholder="Ex: Pilates 2x por semana"
-                value={planName}
-                onChange={(e) => setPlanName(e.target.value)}
-                className="w-full text-xs px-3 py-2 bg-[#F8FAF9] dark:bg-[#111A15] border border-[#E5EAE7] dark:border-[#273830] rounded-lg"
-                required
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-semibold mb-1">Valor Mensal (R$) *</label>
-                <input
-                  type="text"
-                  value={planPriceReais}
-                  onChange={(e) => setPlanPriceReais(e.target.value)}
-                  className="w-full text-xs font-bold px-3 py-2 bg-[#F8FAF9] dark:bg-[#111A15] border border-[#E5EAE7] dark:border-[#273830] rounded-lg"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold mb-1">Qtd. de Sessões *</label>
-                <input
-                  type="number"
-                  min="1"
-                  max="50"
-                  value={planSessions}
-                  onChange={(e) => setPlanSessions(Number(e.target.value))}
-                  className="w-full text-xs px-3 py-2 bg-[#F8FAF9] dark:bg-[#111A15] border border-[#E5EAE7] dark:border-[#273830] rounded-lg"
-                  required
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-semibold mb-1">Frequência semanal</label>
-                <input
-                  type="number"
-                  min="1"
-                  max="7"
-                  value={planFrequency}
-                  onChange={(e) => setPlanFrequency(Number(e.target.value))}
-                  className="w-full text-xs px-3 py-2 bg-[#F8FAF9] dark:bg-[#111A15] border border-[#E5EAE7] dark:border-[#273830] rounded-lg"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold mb-1">Validade (dias)</label>
-                <input
-                  type="number"
-                  min="1"
-                  max="365"
-                  value={planValidityDays}
-                  onChange={(e) => setPlanValidityDays(Number(e.target.value))}
-                  className="w-full text-xs px-3 py-2 bg-[#F8FAF9] dark:bg-[#111A15] border border-[#E5EAE7] dark:border-[#273830] rounded-lg"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold mb-1">Descrição</label>
-              <textarea
-                rows={2}
-                value={planDescription}
-                onChange={(e) => setPlanDescription(e.target.value)}
-                className="w-full text-xs px-3 py-2 bg-[#F8FAF9] dark:bg-[#111A15] border border-[#E5EAE7] dark:border-[#273830] rounded-lg"
-              />
-            </div>
-
-            <div className="flex justify-end gap-2 pt-2 border-t border-[#E5EAE7] dark:border-[#273830]">
-              <button
-                type="button"
-                onClick={() => setIsPlanModalOpen(false)}
-                className="px-4 py-2 text-xs font-semibold text-[#64748B] hover:bg-slate-100 rounded-lg"
-              >
-                Cancelar
-              </button>
-              <button
-                type="submit"
-                className="px-4 py-2 text-xs font-semibold text-white bg-[#426B5B] hover:bg-[#345648] rounded-lg shadow-sm"
-              >
-                Salvar Plano
-              </button>
-            </div>
-          </form>
-        </Modal>
-      )}
 
       {pendingRestore && (
         <Modal

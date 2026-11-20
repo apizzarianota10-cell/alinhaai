@@ -68,6 +68,7 @@ export const ROLE_LABELS: Record<UserRole, string> = {
 /** Sections each role may open (single source for Sidebar and App guard) */
 export const SECTION_ROLES: Record<string, UserRole[] | undefined> = {
   financial: ['admin', 'receptionist'],
+  plans: ['admin', 'receptionist'],
   professionals: ['admin'],
   settings: ['admin'],
   records: ['admin', 'professional'],
@@ -216,7 +217,55 @@ export function buildWhatsAppLink(phone: string, message: string): string {
 }
 
 /**
- * Check if an appointment causes schedule conflict
+ * Modalities that can be booked as a class (several students with the same professional and time).
+ * Kept in sync with the clinic's service areas by clinicStorage.getSettings().
+ */
+let groupModalities: string[] = ['Pilates'];
+export const setGroupModalities = (names: string[]) => {
+  groupModalities = names;
+};
+export const isGroupModality = (modality?: string) => !!modality && groupModalities.includes(modality);
+
+const isActiveBooking = (a: Appointment) => a.status !== 'cancelado' && a.status !== 'reagendado';
+
+/** Same professional, date, start and duration: the bookings that form one class */
+export function sameClassSlot(
+  a: Pick<Appointment, 'professionalId' | 'date' | 'startTime' | 'durationMinutes' | 'modality'>,
+  b: Pick<Appointment, 'professionalId' | 'date' | 'startTime' | 'durationMinutes' | 'modality'>
+): boolean {
+  return (
+    isGroupModality(a.modality) &&
+    a.modality === b.modality &&
+    a.professionalId === b.professionalId &&
+    a.date === b.date &&
+    a.startTime === b.startTime &&
+    (a.durationMinutes || 50) === (b.durationMinutes || 50)
+  );
+}
+
+/** Active bookings of the class at this slot, and its capacity (1 = individual) */
+export function getClassInfo(
+  appointments: Appointment[],
+  slot: Pick<Appointment, 'professionalId' | 'date' | 'startTime' | 'durationMinutes' | 'modality'>,
+  excludeId?: string
+): { students: Appointment[]; capacity: number } {
+  const students = appointments.filter((a) => a.id !== excludeId && isActiveBooking(a) && sameClassSlot(a, slot));
+  const capacity = Math.max(1, ...students.map((s) => s.capacity || 1));
+  return { students, capacity };
+}
+
+export type ScheduleConflict = {
+  hasConflict: boolean;
+  conflictingWith?: Appointment;
+  /** overlap = professional busy; full = class has no free spots; duplicate = student already in this class */
+  reason?: 'overlap' | 'full' | 'duplicate';
+  capacity?: number;
+  enrolled?: number;
+};
+
+/**
+ * Check if an appointment causes schedule conflict.
+ * Group modalities (Pilates) accept several students in the same slot up to the class capacity.
  */
 export function checkScheduleConflict(
   existingAppointments: Appointment[],
@@ -226,17 +275,22 @@ export function checkScheduleConflict(
     date: string;
     startTime: string; // "08:00"
     durationMinutes: number;
+    modality?: string;
+    patientId?: string;
+    /** Students per slot; when omitted, the existing class capacity is used */
+    capacity?: number;
   }
-): { hasConflict: boolean; conflictingWith?: Appointment } {
+): ScheduleConflict {
   const [newH, newM] = newAppt.startTime.split(':').map(Number);
   const newStartMinutes = newH * 60 + newM;
   const newEndMinutes = newStartMinutes + newAppt.durationMinutes;
+  const classmates: Appointment[] = [];
 
   for (const appt of existingAppointments) {
     if (appt.id === newAppt.id) continue;
     if (appt.professionalId !== newAppt.professionalId) continue;
     if (appt.date !== newAppt.date) continue;
-    if (appt.status === 'cancelado' || appt.status === 'reagendado') continue;
+    if (!isActiveBooking(appt)) continue;
 
     const [h, m] = appt.startTime.split(':').map(Number);
     const startMinutes = h * 60 + m;
@@ -244,11 +298,36 @@ export function checkScheduleConflict(
 
     // Overlap condition: start1 < end2 && end1 > start2
     if (newStartMinutes < endMinutes && newEndMinutes > startMinutes) {
-      return { hasConflict: true, conflictingWith: appt };
+      if (newAppt.modality && sameClassSlot(appt, { ...newAppt, modality: newAppt.modality })) {
+        if (newAppt.patientId && appt.patientId === newAppt.patientId) {
+          return { hasConflict: true, conflictingWith: appt, reason: 'duplicate' };
+        }
+        classmates.push(appt);
+        continue;
+      }
+      return { hasConflict: true, conflictingWith: appt, reason: 'overlap' };
+    }
+  }
+
+  if (classmates.length > 0) {
+    const capacity = Math.max(1, newAppt.capacity ?? Math.max(...classmates.map((c) => c.capacity || 1)));
+    if (classmates.length + 1 > capacity) {
+      return { hasConflict: true, conflictingWith: classmates[0], reason: 'full', capacity, enrolled: classmates.length };
     }
   }
 
   return { hasConflict: false };
+}
+
+/** Human-readable message for a schedule conflict */
+export function describeScheduleConflict(c: ScheduleConflict, professionalName: string, patientName?: string): string {
+  const other = c.conflictingWith;
+  if (c.reason === 'duplicate') return `${patientName || other?.patientName} já está agendado(a) neste horário.`;
+  if (c.reason === 'full')
+    return `Turma cheia: ${professionalName} já tem ${c.enrolled} de ${c.capacity} aluno(s) às ${other?.startTime}. Aumente "Alunos por horário" ou escolha outro horário.`;
+  return `Conflito de horário! ${professionalName} já atende ${other?.patientName} às ${other?.startTime}${
+    other && isGroupModality(other.modality) ? ' (para formar turma, use o mesmo horário de início e a mesma duração)' : ''
+  }.`;
 }
 
 /**

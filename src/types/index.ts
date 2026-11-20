@@ -33,7 +33,8 @@ export interface Patient {
     relationship: string;
   };
   createdAt: string;
-  modality: 'Pilates' | 'Fisioterapia' | 'Quiropraxia' | 'Reabilitação';
+  /** Name of a ServiceArea (defaults: Pilates, Fisioterapia, Quiropraxia, Reabilitação) */
+  modality: string;
   responsibleProfessionalId: string;
   status: PatientStatus;
   administrativeNotes?: string;
@@ -85,6 +86,8 @@ export interface Appointment {
   startTime: string; // HH:mm
   endTime: string; // HH:mm
   durationMinutes: number;
+  /** Students allowed in this slot (group modalities such as Pilates). 1 or missing = individual */
+  capacity?: number;
   status: AppointmentStatus;
   isRecurrent: boolean;
   recurrenceId?: string;
@@ -106,6 +109,11 @@ export interface Plan {
   replacementConditions: string;
   description: string;
   active: boolean;
+  /** ServiceArea ids this plan covers (missing = Pilates only, as before areas existed) */
+  areaIds?: string[];
+  /** Individual sessions or a class with up to maxStudents per slot */
+  format?: 'individual' | 'turma';
+  maxStudents?: number;
 }
 
 export type FinancialStatus =
@@ -185,10 +193,15 @@ export type ExerciseCategory =
   | 'Pilates Reformer'
   | 'Pilates Step Chair'
   | 'Pilates Solo'
+  | 'Pilates Cadillac'
+  | 'Pilates Barrel'
   | 'Mobilidade'
   | 'Alongamento'
   | 'Fortalecimento'
   | 'Exercícios terapêuticos';
+
+/** Progression block of the Pilates repertoire */
+export type ExerciseLevel = 'basico' | 'intermediario' | 'avancado';
 
 export interface VisualStep {
   step: number;
@@ -204,6 +217,8 @@ export interface Exercise {
   category: ExerciseCategory;
   equipment: 'Reformer' | 'Step Chair' | 'Cadillac' | 'Solo / Mat' | 'Barrel' | 'Acessórios' | 'Nenhum';
   bodyRegion: 'Tronco & Core' | 'Membros Superiores' | 'Membros Inferiores' | 'Coluna' | 'Corpo Inteiro';
+  /** Optional on stored data saved before levels existed; read through getExerciseLevel() */
+  level?: ExerciseLevel;
   objective: string;
   shortDescription: string;
   instructions: string[];
@@ -364,4 +379,17 @@ export interface ClinicSettings {
   leapYearFeb29Rule: 'feb28' | 'mar01';
   theme: 'light' | 'dark';
   timeZone: string;
+  /** Service areas offered by the clinic (agenda modalities, plan coverage). Missing = defaults */
+  serviceAreas?: ServiceArea[];
+}
+
+/** A service area / modality the clinic offers (Pilates, Fisioterapia, RPG…) */
+export interface ServiceArea {
+  id: string;
+  name: string;
+  /** Several students may share the same slot (classes) */
+  allowsGroups: boolean;
+  /** Suggested "alunos por horário" when booking this area */
+  defaultCapacity?: number;
+  active: boolean;
 }

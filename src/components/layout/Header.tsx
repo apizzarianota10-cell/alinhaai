@@ -19,6 +19,7 @@ import { signOut, onSyncStatus, getSyncStatus } from '../../lib/cloud';
 import { isCloudSession } from '../../lib/demo';
 import { UserRole, Patient, Exercise } from '../../types';
 import { Modal } from '../common/Modal';
+import { InstallAppButton } from '../common/InstallApp';
 import { useToast } from '../common/Toast';
 
 interface HeaderProps {
@@ -249,6 +250,7 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* Right: Actions, Birthday Alert, Demo Reset, Role Selector & Theme */}
       <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
+        <InstallAppButton />
         {/* Birthday Alert Button */}
         <button
           onClick={onOpenBirthdayPopup}

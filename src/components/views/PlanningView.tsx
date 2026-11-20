@@ -14,6 +14,7 @@ import {
   ArrowRight,
 } from 'lucide-react';
 import { clinicStorage } from '../../lib/storage';
+import { EXERCISE_LEVELS, getExerciseLevel } from '../../lib/pilatesCatalog';
 import { formatDate, toLocalDateKey, printElement } from '../../lib/utils';
 
 /** "Segunda" -> "Segunda-feira"; "Sábado" stays as is */
@@ -577,10 +578,16 @@ export const PlanningView: React.FC<PlanningViewProps> = ({ onNavigate, patientI
                 className="w-full px-3 py-2 text-xs bg-[#F8FAF9] dark:bg-[#111A15] border border-[#E5EAE7] dark:border-[#273830] rounded-lg"
                 required
               >
-                {exercises.map((ex) => (
-                  <option key={ex.id} value={ex.id}>
-                    {ex.name} ({ex.equipment})
-                  </option>
+                {EXERCISE_LEVELS.map((lv) => (
+                  <optgroup key={lv.id} label={`Bloco ${lv.label}`}>
+                    {exercises
+                      .filter((ex) => getExerciseLevel(ex) === lv.id)
+                      .map((ex) => (
+                        <option key={ex.id} value={ex.id}>
+                          {ex.name} ({ex.equipment})
+                        </option>
+                      ))}
+                  </optgroup>
                 ))}
               </select>
               {(() => {

@@ -18,7 +18,8 @@ import {
   X,
 } from 'lucide-react';
 import { clinicStorage } from '../../lib/storage';
-import { Exercise, ExerciseCategory, VisualStep } from '../../types';
+import { Exercise, ExerciseCategory, ExerciseLevel, VisualStep } from '../../types';
+import { EXERCISE_LEVELS, LEVEL_LABEL, getExerciseLevel } from '../../lib/pilatesCatalog';
 import { Modal } from '../common/Modal';
 import { useToast } from '../common/Toast';
 
@@ -31,12 +32,22 @@ const CATEGORIES: ExerciseCategory[] = [
   'Pilates Reformer',
   'Pilates Step Chair',
   'Pilates Solo',
+  'Pilates Cadillac',
+  'Pilates Barrel',
   'Mobilidade',
   'Alongamento',
   'Fortalecimento',
   'Exercícios terapêuticos',
 ];
 const EQUIPMENTS: Exercise['equipment'][] = ['Reformer', 'Step Chair', 'Cadillac', 'Solo / Mat', 'Barrel', 'Acessórios', 'Nenhum'];
+/** In Brazil the Cadillac is usually called "Trapézio" */
+const equipmentLabel = (eq: Exercise['equipment']) => (eq === 'Cadillac' ? 'Cadillac / Trapézio' : eq);
+
+const LEVEL_BADGE: Record<ExerciseLevel, string> = {
+  basico: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300',
+  intermediario: 'bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300',
+  avancado: 'bg-rose-100 text-rose-800 dark:bg-rose-950/70 dark:text-rose-300',
+};
 const BODY_REGIONS: Exercise['bodyRegion'][] = ['Tronco & Core', 'Membros Superiores', 'Membros Inferiores', 'Coluna', 'Corpo Inteiro'];
 const PHASES: { title: string; positionType: VisualStep['positionType']; description: string }[] = [
   { title: 'Posição Inicial', positionType: 'inicial', description: 'Posicionamento correto do paciente e calibração das molas/acessórios.' },
@@ -143,6 +154,7 @@ export const ExercisesView: React.FC<ExercisesViewProps> = ({
   const { showToast } = useToast();
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [search, setSearch] = useState('');
+  const [levelFilter, setLevelFilter] = useState<ExerciseLevel | 'all'>('all');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [equipmentFilter, setEquipmentFilter] = useState<string>('all');
   const [bodyRegionFilter, setBodyRegionFilter] = useState<string>('all');
@@ -164,6 +176,7 @@ export const ExercisesView: React.FC<ExercisesViewProps> = ({
   const [formCategory, setFormCategory] = useState<ExerciseCategory>('Pilates Reformer');
   const [formEquipment, setFormEquipment] = useState<Exercise['equipment']>('Reformer');
   const [formBodyRegion, setFormBodyRegion] = useState<Exercise['bodyRegion']>('Tronco & Core');
+  const [formLevel, setFormLevel] = useState<ExerciseLevel>('basico');
   const [formObjective, setFormObjective] = useState('');
   const [formShortDesc, setFormShortDesc] = useState('');
   const [formInstructions, setFormInstructions] = useState('');
@@ -213,6 +226,7 @@ export const ExercisesView: React.FC<ExercisesViewProps> = ({
     setFormCategory('Pilates Reformer');
     setFormEquipment('Reformer');
     setFormBodyRegion('Tronco & Core');
+    setFormLevel('basico');
     setFormObjective('');
     setFormShortDesc('');
     setFormInstructions('');
@@ -248,6 +262,7 @@ export const ExercisesView: React.FC<ExercisesViewProps> = ({
       category: formCategory,
       equipment: formEquipment,
       bodyRegion: formBodyRegion,
+      level: formLevel,
       objective: formObjective.trim(),
       shortDescription: formShortDesc.trim() || formObjective.trim(),
       instructions: formInstructions
@@ -304,7 +319,8 @@ export const ExercisesView: React.FC<ExercisesViewProps> = ({
     setExerciseToDelete(null);
   };
 
-  const filteredExercises = exercises.filter((ex) => {
+  // every filter except the level one — used for the per-level counters on the tabs
+  const matchesOtherFilters = (ex: Exercise) => {
     if (onlyFavorites && !ex.isFavorite) return false;
     if (categoryFilter !== 'all' && ex.category !== categoryFilter) return false;
     if (equipmentFilter !== 'all' && ex.equipment !== equipmentFilter) return false;
@@ -318,7 +334,14 @@ export const ExercisesView: React.FC<ExercisesViewProps> = ({
       );
     }
     return true;
-  });
+  };
+  const baseFiltered = exercises.filter(matchesOtherFilters);
+  const filteredExercises = baseFiltered.filter((ex) => levelFilter === 'all' || getExerciseLevel(ex) === levelFilter);
+  const levelCount = (lv: ExerciseLevel) => baseFiltered.filter((ex) => getExerciseLevel(ex) === lv).length;
+  // blocks shown on screen: all three when "Todos", otherwise only the selected one
+  const levelBlocks = EXERCISE_LEVELS.filter((l) => levelFilter === 'all' || l.id === levelFilter)
+    .map((l) => ({ ...l, items: filteredExercises.filter((ex) => getExerciseLevel(ex) === l.id) }))
+    .filter((b) => b.items.length > 0);
 
   const selectClass =
     'bg-[#F8FAF9] dark:bg-[#111A15] border border-[#E5EAE7] dark:border-[#263730] rounded-lg px-2.5 py-1.5 font-medium';
@@ -377,7 +400,7 @@ export const ExercisesView: React.FC<ExercisesViewProps> = ({
           <select value={equipmentFilter} onChange={(e) => setEquipmentFilter(e.target.value)} className={selectClass} aria-label="Aparelho">
             <option value="all">Todos Aparelhos</option>
             {EQUIPMENTS.map((eq) => (
-              <option key={eq} value={eq}>{eq}</option>
+              <option key={eq} value={eq}>{equipmentLabel(eq)}</option>
             ))}
           </select>
 
@@ -403,15 +426,57 @@ export const ExercisesView: React.FC<ExercisesViewProps> = ({
         </div>
       </div>
 
-      {/* Exercises Cards Grid */}
-      {filteredExercises.length === 0 ? (
+      {/* Level tabs (blocos de progressão) — scrolls sideways on small phones */}
+      <div>
+        <div role="tablist" aria-label="Nível" className="grid grid-cols-4 gap-1.5 sm:flex sm:gap-2">
+          {([{ id: 'all' as const, label: 'Todos', count: baseFiltered.length }] as { id: ExerciseLevel | 'all'; label: string; count: number }[])
+            .concat(EXERCISE_LEVELS.map((l) => ({ id: l.id, label: l.label, count: levelCount(l.id) })))
+            .map((tab) => {
+              const active = levelFilter === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => setLevelFilter(tab.id)}
+                  className={`flex items-center justify-center gap-1 sm:gap-1.5 px-1.5 sm:px-3.5 py-2 rounded-full text-[11px] sm:text-xs font-semibold border transition-colors ${
+                    active
+                      ? 'bg-[#426B5B] border-[#426B5B] text-white'
+                      : 'bg-white dark:bg-[#141F19] border-[#E5EAE7] dark:border-[#263730] text-[#64748B] dark:text-[#9AA8B6] hover:border-[#426B5B]'
+                  }`}
+                >
+                  {tab.label}
+                  <span className={`px-1.5 rounded-full text-[10px] ${active ? 'bg-white/20' : 'bg-[#F1F5F3] dark:bg-[#1F332A]'}`}>
+                    {tab.count}
+                  </span>
+                </button>
+              );
+            })}
+        </div>
+      </div>
+
+      {/* Exercises grouped by level block */}
+      {levelBlocks.length === 0 ? (
         <div className="p-10 text-center rounded-xl border border-dashed border-[#E5EAE7] dark:border-[#263730] text-sm text-[#64748B] dark:text-[#9AA8B6]">
           <Dumbbell className="w-8 h-8 mx-auto mb-2 opacity-60" />
           Nenhum exercício encontrado com esses filtros.
         </div>
       ) : (
+        levelBlocks.map((block) => (
+        <section key={block.id} className="space-y-3" aria-labelledby={`bloco-${block.id}`}>
+          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 pt-2">
+            <h2 id={`bloco-${block.id}`} className="flex items-center gap-2 text-base font-bold text-[#17231D] dark:text-[#EEF3F0]">
+              <span className={`px-2 py-0.5 rounded-md text-[11px] uppercase tracking-wider ${LEVEL_BADGE[block.id]}`}>
+                Bloco {block.label}
+              </span>
+              <span className="text-xs font-medium text-[#64748B] dark:text-[#9AA8B6]">
+                {block.items.length} exercício{block.items.length === 1 ? '' : 's'}
+              </span>
+            </h2>
+            <p className="text-xs text-[#64748B] dark:text-[#9AA8B6]">{block.description}</p>
+          </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filteredExercises.map((ex) => {
+          {block.items.map((ex) => {
             const cover = ex.steps[0]?.imageUrl;
             // hovering a card plays its GIF (or the uploaded final frame) as a preview
             const preview = hoveredId === ex.id ? ex.gifUrl || ex.steps[2]?.imageUrl || cover : cover;
@@ -441,7 +506,10 @@ export const ExercisesView: React.FC<ExercisesViewProps> = ({
                     </div>
                   )}
                   <span className="absolute top-2 left-2 text-[10px] font-bold uppercase tracking-wider text-white bg-[#17231D]/70 backdrop-blur px-2 py-0.5 rounded">
-                    {ex.equipment}
+                    {equipmentLabel(ex.equipment)}
+                  </span>
+                  <span className={`absolute bottom-2 right-2 text-[10px] font-bold px-2 py-0.5 rounded-full ${LEVEL_BADGE[getExerciseLevel(ex)]}`}>
+                    {LEVEL_LABEL[getExerciseLevel(ex)]}
                   </span>
                   {ex.gifUrl || ex.mediaSource === 'upload' ? (
                     <span className="absolute bottom-2 left-2 flex items-center gap-1 text-[10px] font-semibold text-white bg-black/55 px-2 py-0.5 rounded-full">
@@ -476,6 +544,8 @@ export const ExercisesView: React.FC<ExercisesViewProps> = ({
             );
           })}
         </div>
+        </section>
+        ))
       )}
 
       {/* DETAIL & VISUAL SEQUENCE PLAYER MODAL */}
@@ -484,7 +554,7 @@ export const ExercisesView: React.FC<ExercisesViewProps> = ({
           isOpen={true}
           onClose={() => setSelectedExerciseId(null)}
           title={selectedExercise.name}
-          description={`${selectedExercise.category} • ${selectedExercise.equipment} • ${selectedExercise.bodyRegion}`}
+          description={`Nível ${LEVEL_LABEL[getExerciseLevel(selectedExercise)]} • ${selectedExercise.category} • ${equipmentLabel(selectedExercise.equipment)} • ${selectedExercise.bodyRegion}`}
           maxWidth="3xl"
         >
           <div className="space-y-4">
@@ -665,10 +735,17 @@ export const ExercisesView: React.FC<ExercisesViewProps> = ({
             </div>
 
             <div className="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-[#E5EAE7] dark:border-[#263730]">
-              <span className="text-[11px] text-emerald-700 dark:text-emerald-400 flex items-center gap-1 font-semibold">
-                <CheckCircle2 className="w-3.5 h-3.5" />
-                Revisado por Profissional Habilitado (CREFITO)
-              </span>
+              {selectedExercise.reviewedByProfessional ? (
+                <span className="text-[11px] text-emerald-700 dark:text-emerald-400 flex items-center gap-1 font-semibold">
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  Revisado por Profissional Habilitado (CREFITO)
+                </span>
+              ) : (
+                <span className="text-[11px] text-amber-700 dark:text-amber-400 flex items-center gap-1 font-semibold">
+                  <AlertTriangle className="w-3.5 h-3.5" />
+                  Referência técnica — revise antes de prescrever
+                </span>
+              )}
 
               <div className="flex items-center gap-2">
                 {isCustomExercise(selectedExercise) && (
@@ -722,7 +799,15 @@ export const ExercisesView: React.FC<ExercisesViewProps> = ({
               />
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div>
+                <label className="block text-xs font-semibold mb-1">Nível</label>
+                <select value={formLevel} onChange={(e) => setFormLevel(e.target.value as ExerciseLevel)} className={inputClass}>
+                  {EXERCISE_LEVELS.map((l) => (
+                    <option key={l.id} value={l.id}>{l.label}</option>
+                  ))}
+                </select>
+              </div>
               <div>
                 <label className="block text-xs font-semibold mb-1">Categoria</label>
                 <select value={formCategory} onChange={(e) => setFormCategory(e.target.value as ExerciseCategory)} className={inputClass}>
@@ -735,7 +820,7 @@ export const ExercisesView: React.FC<ExercisesViewProps> = ({
                 <label className="block text-xs font-semibold mb-1">Aparelho</label>
                 <select value={formEquipment} onChange={(e) => setFormEquipment(e.target.value as Exercise['equipment'])} className={inputClass}>
                   {EQUIPMENTS.map((eq) => (
-                    <option key={eq} value={eq}>{eq}</option>
+                    <option key={eq} value={eq}>{equipmentLabel(eq)}</option>
                   ))}
                 </select>
               </div>

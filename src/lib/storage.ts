@@ -15,6 +15,7 @@ import {
   PaymentMethod,
   AttendanceRecord,
   ClinicalEvolutionEntry,
+  ServiceArea,
 } from '../types';
 import {
   INITIAL_PATIENTS,
@@ -28,9 +29,10 @@ import {
   INITIAL_CLINICAL_RECORDS,
   INITIAL_ATTENDANCES,
   DEFAULT_SETTINGS,
+  DEFAULT_SERVICE_AREAS,
 } from './constants';
 import { withExerciseMedia } from './exerciseMedia';
-import { toLocalDateKey, nowStamp, formatCurrency } from './utils';
+import { toLocalDateKey, nowStamp, formatCurrency, setGroupModalities } from './utils';
 
 const STORAGE_KEYS = {
   PATIENTS: 'pilatesflow_patients',
@@ -243,7 +245,20 @@ export const clinicStorage = {
     const prefersDark =
       typeof window !== 'undefined' && window.matchMedia?.('(prefers-color-scheme: dark)').matches;
     const fallback: ClinicSettings = { ...DEFAULT_SETTINGS, theme: prefersDark ? 'dark' : 'light' };
-    return { ...fallback, ...getItem<Partial<ClinicSettings>>(STORAGE_KEYS.SETTINGS, {}) };
+    const settings = { ...fallback, ...getItem<Partial<ClinicSettings>>(STORAGE_KEYS.SETTINGS, {}) };
+    const areas: ServiceArea[] = settings.serviceAreas?.length ? settings.serviceAreas : DEFAULT_SERVICE_AREAS;
+    setGroupModalities(areas.filter((a) => a.allowsGroups).map((a) => a.name));
+    return { ...settings, serviceAreas: areas };
+  },
+
+  /** Areas the clinic offers; active ones feed the agenda and plan forms */
+  getServiceAreas(onlyActive = false): ServiceArea[] {
+    const areas = this.getSettings().serviceAreas || DEFAULT_SERVICE_AREAS;
+    return onlyActive ? areas.filter((a) => a.active) : areas;
+  },
+
+  saveServiceAreas(areas: ServiceArea[]): void {
+    this.saveSettings({ ...this.getSettings(), serviceAreas: areas });
   },
 
   saveSettings(settings: ClinicSettings): void {
@@ -339,6 +354,10 @@ export const clinicStorage = {
       plans.push(plan);
     }
     setItem(STORAGE_KEYS.PLANS, plans);
+  },
+
+  deletePlan(id: string): void {
+    setItem(STORAGE_KEYS.PLANS, this.getPlans().filter((p) => p.id !== id));
   },
 
   // APPOINTMENTS
@@ -455,7 +474,16 @@ export const clinicStorage = {
 
   // EXERCISES
   getExercises(): Exercise[] {
-    return getItem<Exercise[]>(STORAGE_KEYS.EXERCISES, INITIAL_EXERCISES).map(withExerciseMedia);
+    const stored = getItem<Exercise[]>(STORAGE_KEYS.EXERCISES, INITIAL_EXERCISES);
+    // Clinics saved before a catalogue update keep their edits (favourites, own photos) and
+    // receive the new catalogue exercises and level tags. Catalogue items can't be deleted in the UI.
+    const catalogue = new Map(INITIAL_EXERCISES.map((e) => [e.id, e]));
+    const storedIds = new Set(stored.map((e) => e.id));
+    const merged = [
+      ...stored.map((e) => (e.level || !catalogue.has(e.id) ? e : { ...e, level: catalogue.get(e.id)!.level })),
+      ...INITIAL_EXERCISES.filter((e) => !storedIds.has(e.id)),
+    ];
+    return merged.map(withExerciseMedia);
   },
 
   saveExercise(exercise: Exercise): boolean {

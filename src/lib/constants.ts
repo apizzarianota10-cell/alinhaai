@@ -10,7 +10,9 @@ import {
   ClinicSettings,
   ClinicalRecord,
   AttendanceRecord,
+  ServiceArea,
 } from '../types';
+import { PILATES_CATALOG } from './pilatesCatalog';
 
 export const DEFAULT_SETTINGS: ClinicSettings = {
   clinicName: 'Clínica Pilates & Movimento',
@@ -31,7 +33,16 @@ export const DEFAULT_SETTINGS: ClinicSettings = {
   leapYearFeb29Rule: 'feb28',
   theme: 'light',
   timeZone: 'America/Recife',
+  // serviceAreas left empty: clinicStorage.getSettings() falls back to DEFAULT_SERVICE_AREAS
 };
+
+/** Areas offered out of the box; the clinic edits them in "Planos e Áreas" */
+export const DEFAULT_SERVICE_AREAS: ServiceArea[] = [
+  { id: 'area-pilates', name: 'Pilates', allowsGroups: true, defaultCapacity: 3, active: true },
+  { id: 'area-fisio', name: 'Fisioterapia', allowsGroups: false, active: true },
+  { id: 'area-quiro', name: 'Quiropraxia', allowsGroups: false, active: true },
+  { id: 'area-reab', name: 'Reabilitação', allowsGroups: false, active: true },
+];
 
 export const INITIAL_PROFESSIONALS: Professional[] = [
   {
@@ -381,10 +392,11 @@ export const INITIAL_PATIENTS: Patient[] = [
   },
 ];
 
-export const INITIAL_EXERCISES: Exercise[] = [
+const BASE_EXERCISES: Exercise[] = [
   // REFORMER
   {
     id: 'ex-ref-1',
+    level: 'basico',
     name: 'Footwork (Toes, Arches, Heels)',
     category: 'Pilates Reformer',
     equipment: 'Reformer',
@@ -425,6 +437,7 @@ export const INITIAL_EXERCISES: Exercise[] = [
   },
   {
     id: 'ex-ref-2',
+    level: 'intermediario',
     name: 'Mermaid no Reformer',
     category: 'Pilates Reformer',
     equipment: 'Reformer',
@@ -464,6 +477,7 @@ export const INITIAL_EXERCISES: Exercise[] = [
   },
   {
     id: 'ex-ref-3',
+    level: 'intermediario',
     name: 'The Hundred no Reformer',
     category: 'Pilates Reformer',
     equipment: 'Reformer',
@@ -502,6 +516,7 @@ export const INITIAL_EXERCISES: Exercise[] = [
   },
   {
     id: 'ex-ref-4',
+    level: 'avancado',
     name: 'Short Spine Massage',
     category: 'Pilates Reformer',
     equipment: 'Reformer',
@@ -540,6 +555,7 @@ export const INITIAL_EXERCISES: Exercise[] = [
   },
   {
     id: 'ex-ref-5',
+    level: 'intermediario',
     name: 'Knee Stretches Round',
     category: 'Pilates Reformer',
     equipment: 'Reformer',
@@ -579,6 +595,7 @@ export const INITIAL_EXERCISES: Exercise[] = [
   // STEP CHAIR
   {
     id: 'ex-chr-1',
+    level: 'basico',
     name: 'Hamstring Stretch na Chair',
     category: 'Pilates Step Chair',
     equipment: 'Step Chair',
@@ -617,6 +634,7 @@ export const INITIAL_EXERCISES: Exercise[] = [
   },
   {
     id: 'ex-chr-2',
+    level: 'intermediario',
     name: 'The Cat na Step Chair',
     category: 'Pilates Step Chair',
     equipment: 'Step Chair',
@@ -654,6 +672,7 @@ export const INITIAL_EXERCISES: Exercise[] = [
   },
   {
     id: 'ex-chr-3',
+    level: 'intermediario',
     name: 'Swan Front na Step Chair',
     category: 'Pilates Step Chair',
     equipment: 'Step Chair',
@@ -691,6 +710,7 @@ export const INITIAL_EXERCISES: Exercise[] = [
   },
   {
     id: 'ex-chr-4',
+    level: 'basico',
     name: 'Footwork na Chair (Sentado)',
     category: 'Pilates Step Chair',
     equipment: 'Step Chair',
@@ -730,6 +750,7 @@ export const INITIAL_EXERCISES: Exercise[] = [
   // MAT / SOLO
   {
     id: 'ex-sol-1',
+    level: 'intermediario',
     name: 'Roll Up no Solo',
     category: 'Pilates Solo',
     equipment: 'Solo / Mat',
@@ -768,6 +789,7 @@ export const INITIAL_EXERCISES: Exercise[] = [
   },
   {
     id: 'ex-sol-2',
+    level: 'basico',
     name: 'Single Leg Stretch',
     category: 'Pilates Solo',
     equipment: 'Solo / Mat',
@@ -805,6 +827,7 @@ export const INITIAL_EXERCISES: Exercise[] = [
   },
   {
     id: 'ex-sol-3',
+    level: 'basico',
     name: 'Shoulder Bridge no Mat',
     category: 'Pilates Solo',
     equipment: 'Solo / Mat',
@@ -845,6 +868,7 @@ export const INITIAL_EXERCISES: Exercise[] = [
   // MOBILIDADE & TERAPÊUTICO
   {
     id: 'ex-mob-1',
+    level: 'basico',
     name: 'Open Book (Livro Aberto)',
     category: 'Mobilidade',
     equipment: 'Solo / Mat',
@@ -884,6 +908,7 @@ export const INITIAL_EXERCISES: Exercise[] = [
   },
   {
     id: 'ex-mob-2',
+    level: 'basico',
     name: 'Side to Side (Pêndulo Pélvico)',
     category: 'Mobilidade',
     equipment: 'Solo / Mat',
@@ -920,6 +945,9 @@ export const INITIAL_EXERCISES: Exercise[] = [
     reviewedByProfessional: true,
   },
 ];
+
+/** Original catalogue plus the Pilates repertoire organised by level */
+export const INITIAL_EXERCISES: Exercise[] = [...BASE_EXERCISES, ...PILATES_CATALOG];
 
 export const INITIAL_WORKOUT_PLANS: WorkoutPlan[] = [
   {
