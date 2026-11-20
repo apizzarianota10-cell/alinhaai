@@ -208,31 +208,60 @@ export type PresenceSummary = {
   P: number;
   C: number;
   F: number;
-  last?: string;
+  /** % of booked sessions attended in the period (null = no records) */
+  freq: number | null;
   cyclePos: number;
+  last?: string;
+  /** "YYYY-MM-DD HH:mm" of the next booked session */
+  next?: string;
+  planName?: string;
+  alerts: string[];
 };
 
 export async function downloadPresenceOverviewPdf(list: PresenceSummary[], settings: ClinicSettings, periodLabel: string) {
   const { doc, autoTable } = await newDoc();
-  const y = header(doc, 'Controle de Presença - Visão geral', periodLabel, settings);
+  const y = header(doc, "Controle de Presença - Visão geral", periodLabel, settings);
+  const tot = list.reduce((t, s) => ({ P: t.P + s.P, C: t.C + s.C, F: t.F + s.F }), { P: 0, C: 0, F: 0 });
+  const all = tot.P + tot.C + tot.F;
+  doc.setFontSize(9);
+  doc.setTextColor(23, 35, 29);
+  doc.text(
+    safe(`Frequência média: ${all ? Math.round(((tot.P + tot.C) / all) * 100) + "%" : "-"}   Presenças: ${tot.P}   Compensações: ${tot.C}   Faltas: ${tot.F}   Alunos com alerta: ${list.filter((s) => s.alerts.length).length}`),
+    MARGIN,
+    y
+  );
   autoTable(doc, {
-    startY: y + 2,
+    startY: y + 3,
     margin: { left: MARGIN, right: MARGIN },
-    theme: 'striped',
-    head: [['Aluno', 'P', 'C', 'Faltas', 'Sessão no ciclo', 'Última presença', 'Restantes']],
+    theme: "striped",
+    head: [["Aluno", "Plano", "Freq.", "P", "C", "F", "Ciclo", "Última", "Próxima", "Rest.", "Alertas"]],
     body: list.map((s) => [
       safe(s.patient.name),
+      safe(s.planName || "-"),
+      s.freq === null ? "-" : `${s.freq}%`,
       s.P,
       s.C,
       s.F,
       `${s.cyclePos}/30`,
-      s.last ? formatDate(s.last) : '-',
+      s.last ? formatDate(s.last, "dd/MM/yy") : "-",
+      s.next ? `${formatDate(s.next.slice(0, 10), "dd/MM")} ${s.next.slice(11)}` : "-",
       s.patient.sessionsRemaining,
+      safe(s.alerts.join(", ") || "Em dia"),
     ]),
-    styles: { fontSize: 8.5, cellPadding: 1.8 },
-    headStyles: { fillColor: GREEN, textColor: 255, fontStyle: 'bold' },
-    columnStyles: { 1: { halign: 'center' }, 2: { halign: 'center' }, 3: { halign: 'center' }, 4: { halign: 'center' }, 6: { halign: 'center' } },
+    styles: { fontSize: 7.5, cellPadding: 1.5, valign: "middle" },
+    headStyles: { fillColor: GREEN, textColor: 255, fontStyle: "bold" },
+    columnStyles: {
+      0: { cellWidth: 34, fontStyle: "bold" },
+      1: { cellWidth: 26 },
+      2: { halign: "center" },
+      3: { halign: "center" },
+      4: { halign: "center" },
+      5: { halign: "center" },
+      6: { halign: "center" },
+      9: { halign: "center" },
+      10: { cellWidth: 30 },
+    },
   });
   footer(doc, settings);
-  doc.save(fileName('Controle_de_Presenca_Geral', new Date().toISOString().slice(0, 10)));
+  doc.save(fileName("Controle_de_Presenca_Geral", new Date().toISOString().slice(0, 10)));
 }

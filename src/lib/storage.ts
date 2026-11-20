@@ -442,6 +442,23 @@ export const clinicStorage = {
     }
   },
 
+  /**
+   * Roll call: marks a booked session as attended and consumes one session of the plan
+   * (same effect as finishing an attendance, without the evolution entry). Returns false if it was already done.
+   */
+  markAppointmentPresent(id: string): boolean {
+    const appt = this.getAppointments().find((a) => a.id === id);
+    if (!appt || appt.status === 'realizado') return false;
+    this.updateAppointmentStatus(id, 'realizado');
+    const patient = this.getPatientById(appt.patientId);
+    if (patient) {
+      patient.sessionsCompleted = (patient.sessionsCompleted || 0) + 1;
+      patient.sessionsRemaining = Math.max(0, (patient.sessionsRemaining || 0) - 1);
+      this.savePatient(patient);
+    }
+    return true;
+  },
+
   deleteAppointment(id: string): void {
     const appts = this.getAppointments().filter((a) => a.id !== id);
     setItem(STORAGE_KEYS.APPOINTMENTS, appts);

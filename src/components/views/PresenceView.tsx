@@ -1,9 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { CalendarCheck2, Plus, Printer, Trash2, Search, CheckCircle2, RotateCcw, XCircle, Download, ArrowLeft, Loader2 } from 'lucide-react';
+import { CalendarCheck2, Plus, Printer, Trash2, Search, CheckCircle2, RotateCcw, XCircle, Download, ArrowLeft, Loader2, Clock, TrendingUp, AlertTriangle } from 'lucide-react';
 import { clinicStorage } from '../../lib/storage';
-import { formatDate, printElement } from '../../lib/utils';
+import { formatDate, printElement, STATUS_LABELS } from '../../lib/utils';
+import { StatCard, Avatar, ProgressBar, Pill, Card, daysBetween, AlertTone } from '../common/Insights';
 import { downloadPresencePdf, downloadPresenceOverviewPdf, PresenceSummary } from '../../lib/pdf';
-import { ManualPresenceEntry, Patient, PresenceMark, PresenceSheet } from '../../types';
+import { Appointment, ManualPresenceEntry, Patient, Plan, PresenceMark, PresenceSheet } from '../../types';
 import { Modal } from '../common/Modal';
 import { useToast } from '../common/Toast';
 
@@ -108,16 +109,63 @@ export const PresenceSheetPanel: React.FC<{ patient: Patient; compact?: boolean 
     </div>
   );
 
+  const plan = clinicStorage.getPlans().find((pl) => pl.id === patient.activePlanId);
+  const professional = clinicStorage.getProfessionals().find((pr) => pr.id === patient.responsibleProfessionalId);
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const nextAppt = clinicStorage
+    .getAppointments()
+    .filter((a) => a.patientId === patient.id && a.date >= todayStr && (a.status === 'agendado' || a.status === 'confirmado'))
+    .sort((a, b) => (a.date + a.startTime).localeCompare(b.date + b.startTime))[0];
+  const marked = rows.length;
+  const freq = marked ? Math.round((attended.length / marked) * 100) : null;
+  const cyclePos = attended.length % 30 || (attended.length ? 30 : 0);
+
   return (
     <div className="space-y-3">
+      {!compact && (
+        <div className="p-3 sm:p-4 rounded-xl bg-white dark:bg-[#17231D] border border-[#E5EAE7] dark:border-[#273830] flex flex-col lg:flex-row gap-4">
+          <div className="flex items-center gap-3 lg:w-72">
+            <Avatar name={patient.name} size="lg" />
+            <div className="min-w-0">
+              <p className="font-bold text-base truncate">{patient.name}</p>
+              <p className="text-[11px] text-[#64748B] truncate">{[plan?.name, patient.modality].filter(Boolean).join(' • ')}</p>
+              {professional && <p className="text-[11px] text-[#64748B] truncate">Prof. {professional.name}</p>}
+            </div>
+          </div>
+          <dl className="flex-1 grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+            <div>
+              <dt className="text-[#64748B]">Frequência</dt>
+              <dd className="text-lg font-bold">{freq === null ? '—' : `${freq}%`}</dd>
+              <ProgressBar value={freq ?? 0} label="Frequência" />
+            </div>
+            <div>
+              <dt className="text-[#64748B]">Ciclo atual</dt>
+              <dd className="text-lg font-bold">{cyclePos}/30</dd>
+              <ProgressBar value={cyclePos} max={30} tone="blue" label="Ciclo" />
+            </div>
+            <div>
+              <dt className="text-[#64748B]">Sessões restantes</dt>
+              <dd className={`text-lg font-bold ${patient.sessionsRemaining <= 2 ? 'text-rose-600' : ''}`}>{patient.sessionsRemaining}</dd>
+              <span className="text-[10px] text-[#64748B]">{patient.sessionsCompleted || 0} realizadas no total</span>
+            </div>
+            <div>
+              <dt className="text-[#64748B]">Próxima sessão</dt>
+              <dd className="text-sm font-bold mt-1">{nextAppt ? `${formatDate(nextAppt.date, 'dd/MM')} às ${nextAppt.startTime}` : '—'}</dd>
+              <span className="text-[10px] text-[#64748B]">{nextAppt?.professionalName || 'Nada agendado'}</span>
+            </div>
+          </dl>
+        </div>
+      )}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap gap-1.5 text-[11px] font-semibold">
           <span className={`px-2 py-1 rounded-full ${MARK_STYLE.P}`}>P {rows.filter((r) => r.mark === 'P').length}</span>
           <span className={`px-2 py-1 rounded-full ${MARK_STYLE.C}`}>C {rows.filter((r) => r.mark === 'C').length}</span>
           <span className={`px-2 py-1 rounded-full ${MARK_STYLE.F}`}>Faltas {absences.length}</span>
-          <span className="px-2 py-1 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
-            {patient.sessionsRemaining} sessões restantes no plano
-          </span>
+          {compact && (
+            <span className="px-2 py-1 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+              {patient.sessionsRemaining} {patient.sessionsRemaining === 1 ? 'sessão restante' : 'sessões restantes'} no plano
+            </span>
+          )}
         </div>
         <div className="flex flex-wrap gap-2">
           <button
@@ -310,52 +358,199 @@ export const PresenceSheetPanel: React.FC<{ patient: Patient; compact?: boolean 
   );
 };
 
+type Period = 'mes' | '30d' | 'tudo';
+const PERIOD_LABEL: Record<Period, string> = { mes: 'Este mês', '30d': 'Últimos 30 dias', tudo: 'Todo o período' };
+type SortKey = 'nome' | 'frequencia' | 'faltas' | 'ultima';
+
+const todayKey = () => new Date().toISOString().slice(0, 10);
+function periodStart(p: Period): string {
+  const now = new Date();
+  if (p === 'mes') return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+  if (p === '30d') return new Date(now.getTime() - 29 * 86400000).toISOString().slice(0, 10);
+  return '0000-00-00';
+}
+
+type StudentAlert = { label: string; tone: AlertTone; title: string };
+
+/** Everything the overview shows about one student */
+function summarize(p: Patient, period: Period, plans: Plan[], appts: Appointment[]): PresenceSummary & { alertsDetail: StudentAlert[] } {
+  const rows = buildRows(p.id, clinicStorage.getPresenceSheet(p.id));
+  const from = periodStart(period);
+  const today = todayKey();
+  const inPeriod = rows.filter((r) => r.date >= from && r.date <= today);
+  const P = inPeriod.filter((r) => r.mark === 'P').length;
+  const C = inPeriod.filter((r) => r.mark === 'C').length;
+  const F = inPeriod.filter((r) => r.mark === 'F').length;
+  const attended = rows.filter((r) => r.mark !== 'F');
+  const cyclePos = attended.length % 30 || (attended.length ? 30 : 0);
+  const last = attended[attended.length - 1]?.date;
+  const next = appts
+    .filter((a) => a.patientId === p.id && a.date >= today && (a.status === 'agendado' || a.status === 'confirmado'))
+    .sort((a, b) => (a.date + a.startTime).localeCompare(b.date + b.startTime))[0];
+
+  const alertsDetail: StudentAlert[] = [];
+  if (attended.length > 0 && cyclePos >= 27)
+    alertsDetail.push({
+      label: cyclePos === 30 ? 'Reavaliar' : `Reavaliação em ${30 - cyclePos}`,
+      tone: 'amber',
+      title: 'A cada 30 sessões o aluno deve ser reavaliado',
+    });
+  if (p.status === 'ativo' && p.sessionsRemaining <= 2)
+    alertsDetail.push({
+      label: p.sessionsRemaining === 0 ? 'Plano esgotado' : `Plano: ${p.sessionsRemaining} restante${p.sessionsRemaining > 1 ? 's' : ''}`,
+      tone: 'rose',
+      title: 'Renovação do plano',
+    });
+  if (F >= 2) alertsDetail.push({ label: `${F} faltas`, tone: 'rose', title: `Faltas em: ${PERIOD_LABEL[period].toLowerCase()}` });
+  if (last && daysBetween(last, today) > 14 && !next)
+    alertsDetail.push({ label: `Ausente há ${daysBetween(last, today)} dias`, tone: 'slate', title: 'Sem presença e sem sessão agendada' });
+
+  return {
+    patient: p,
+    P,
+    C,
+    F,
+    freq: P + C + F > 0 ? Math.round(((P + C) / (P + C + F)) * 100) : null,
+    cyclePos,
+    last,
+    next: next ? `${next.date} ${next.startTime}` : undefined,
+    planName: plans.find((pl) => pl.id === p.activePlanId)?.name,
+    alerts: alertsDetail.map((a) => a.label),
+    alertsDetail,
+  };
+}
+
+/** Today's booked sessions with one-tap Presente / Falta */
+const TodayRollCall: React.FC = () => {
+  const { showToast } = useToast();
+  const [items, setItems] = useState<Appointment[]>([]);
+  useEffect(() => {
+    const load = () =>
+      setItems(
+        clinicStorage
+          .getAppointments()
+          .filter((a) => a.date === todayKey() && a.status !== 'cancelado' && a.status !== 'reagendado')
+          .sort((a, b) => a.startTime.localeCompare(b.startTime))
+      );
+    load();
+    return clinicStorage.subscribe(load);
+  }, []);
+
+  const done = items.filter((a) => a.status === 'realizado').length;
+  const missed = items.filter((a) => a.status === 'faltou').length;
+
+  return (
+    <Card
+      title={
+        <span className="flex items-center gap-2">
+          <Clock className="w-4 h-4 text-[#426B5B] dark:text-[#7FB39F]" /> Chamada de hoje
+        </span>
+      }
+      action={
+        <span className="text-[11px] text-[#64748B]">
+          {done} presentes • {missed} faltas • {items.length - done - missed} a confirmar
+        </span>
+      }
+    >
+      {items.length === 0 ? (
+        <p className="text-xs text-[#64748B] py-4 text-center">Nenhuma sessão agendada para hoje.</p>
+      ) : (
+        <ul className="divide-y divide-[#E5EAE7] dark:divide-[#273830]">
+          {items.map((a) => {
+            const open = a.status === 'agendado' || a.status === 'confirmado' || a.status === 'em_atendimento';
+            return (
+              <li key={a.id} className="py-2.5 flex flex-wrap items-center gap-x-3 gap-y-2">
+                <span className="w-12 font-mono text-xs font-bold text-[#426B5B] dark:text-[#7FB39F]">{a.startTime}</span>
+                <Avatar name={a.patientName} size="sm" />
+                <div className="flex-1 min-w-[9rem]">
+                  <p className="text-sm font-semibold leading-tight">{a.patientName}</p>
+                  <p className="text-[11px] text-[#64748B]">
+                    {a.modality} • {a.professionalName}
+                  </p>
+                </div>
+                {open ? (
+                  <div className="flex gap-1.5 ml-auto">
+                    <button
+                      onClick={() => {
+                        if (clinicStorage.markAppointmentPresent(a.id)) showToast(`Presença de ${a.patientName.split(' ')[0]} registrada.`, 'success');
+                      }}
+                      className="flex items-center gap-1 px-3 py-2 text-xs font-semibold rounded-lg text-white bg-emerald-600 hover:bg-emerald-700"
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5" /> Presente
+                    </button>
+                    <button
+                      onClick={() => {
+                        const r = clinicStorage.registerMissedSession(a.id, 'faltou');
+                        showToast(r.sessionConsumed ? 'Falta registrada (1 sessão descontada, regra da clínica).' : 'Falta registrada.', 'info');
+                      }}
+                      className="flex items-center gap-1 px-3 py-2 text-xs font-semibold rounded-lg border border-rose-300 text-rose-700 dark:border-rose-800 dark:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/40"
+                    >
+                      <XCircle className="w-3.5 h-3.5" /> Falta
+                    </button>
+                  </div>
+                ) : (
+                  <span className="ml-auto">
+                    <Pill tone={a.status === 'realizado' ? 'green' : 'rose'}>{STATUS_LABELS[a.status] || a.status}</Pill>
+                  </span>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </Card>
+  );
+};
+
 export const PresenceView: React.FC<{ patientId?: string }> = ({ patientId }) => {
   const { showToast } = useToast();
   const [patients, setPatients] = useState<Patient[]>([]);
-  const [summaries, setSummaries] = useState<PresenceSummary[]>([]);
+  const [summaries, setSummaries] = useState<ReturnType<typeof summarize>[]>([]);
   const [selectedId, setSelectedId] = useState<string>(patientId || '');
   const [search, setSearch] = useState('');
+  const [period, setPeriod] = useState<Period>('mes');
+  const [onlyAlerts, setOnlyAlerts] = useState(false);
+  const [sort, setSort] = useState<SortKey>('nome');
   const [pdfBusy, setPdfBusy] = useState(false);
 
   useEffect(() => {
     const load = () => {
       const pts = clinicStorage.getPatients().filter((p) => p.status !== 'arquivado');
+      const plans = clinicStorage.getPlans();
+      const appts = clinicStorage.getAppointments();
       setPatients(pts);
-      // overview of every student, computed from the agenda + manual entries
-      setSummaries(
-        pts
-          .map((p) => {
-            const rows = buildRows(p.id, clinicStorage.getPresenceSheet(p.id));
-            const attended = rows.filter((r) => r.mark !== 'F');
-            return {
-              patient: p,
-              P: rows.filter((r) => r.mark === 'P').length,
-              C: rows.filter((r) => r.mark === 'C').length,
-              F: rows.filter((r) => r.mark === 'F').length,
-              last: attended[attended.length - 1]?.date,
-              cyclePos: attended.length % 30 || (attended.length ? 30 : 0),
-            };
-          })
-          .sort((a, b) => a.patient.name.localeCompare(b.patient.name))
-      );
+      setSummaries(pts.map((p) => summarize(p, period, plans, appts)));
     };
     load();
     return clinicStorage.subscribe(load);
-  }, []);
+  }, [period]);
   useEffect(() => {
     if (patientId) setSelectedId(patientId);
   }, [patientId]);
 
   const q = search.trim().toLowerCase();
-  const filtered = useMemo(() => summaries.filter((s) => s.patient.name.toLowerCase().includes(q)), [summaries, q]);
+  const filtered = useMemo(() => {
+    const list = summaries.filter((s) => s.patient.name.toLowerCase().includes(q) && (!onlyAlerts || s.alertsDetail.length > 0));
+    const by: Record<SortKey, (a: (typeof list)[0], b: (typeof list)[0]) => number> = {
+      nome: (a, b) => a.patient.name.localeCompare(b.patient.name),
+      frequencia: (a, b) => (a.freq ?? 101) - (b.freq ?? 101),
+      faltas: (a, b) => b.F - a.F,
+      ultima: (a, b) => (a.last || '').localeCompare(b.last || ''),
+    };
+    return [...list].sort(by[sort]);
+  }, [summaries, q, onlyAlerts, sort]);
   const selected = patients.find((p) => p.id === selectedId) || null;
-  const totals = filtered.reduce((t, s) => ({ P: t.P + s.P, C: t.C + s.C, F: t.F + s.F }), { P: 0, C: 0, F: 0 });
+
+  const totals = summaries.reduce((t, s) => ({ P: t.P + s.P, C: t.C + s.C, F: t.F + s.F }), { P: 0, C: 0, F: 0 });
+  const overallFreq = totals.P + totals.C + totals.F > 0 ? Math.round(((totals.P + totals.C) / (totals.P + totals.C + totals.F)) * 100) : null;
+  const withAlerts = summaries.filter((s) => s.alertsDetail.length > 0).length;
+  const active = summaries.filter((s) => s.patient.status === 'ativo').length;
+  const repeatAbsent = summaries.filter((s) => s.F >= 2).length;
 
   const handleOverviewPdf = async () => {
     setPdfBusy(true);
     try {
-      await downloadPresenceOverviewPdf(filtered, clinicStorage.getSettings(), `${filtered.length} alunos - gerado em ${formatDate(new Date().toISOString().slice(0, 10))}`);
+      await downloadPresenceOverviewPdf(filtered, clinicStorage.getSettings(), `${PERIOD_LABEL[period]} - ${filtered.length} alunos - gerado em ${formatDate(todayKey())}`);
     } catch (e) {
       console.error(e);
       showToast('Não foi possível gerar o PDF.', 'error');
@@ -363,6 +558,11 @@ export const PresenceView: React.FC<{ patientId?: string }> = ({ patientId }) =>
       setPdfBusy(false);
     }
   };
+
+  const chip = (on: boolean) =>
+    `px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
+      on ? 'bg-[#426B5B] border-[#426B5B] text-white' : 'bg-white dark:bg-[#141F19] border-[#E5EAE7] dark:border-[#263730] text-[#64748B] dark:text-[#9AA8B6]'
+    }`;
 
   return (
     <div className="space-y-4">
@@ -372,7 +572,7 @@ export const PresenceView: React.FC<{ patientId?: string }> = ({ patientId }) =>
             <CalendarCheck2 className="w-6 h-6 text-[#426B5B] dark:text-[#7FB39F]" /> Controle de Presença
           </h1>
           <p className="text-xs sm:text-sm text-[#64748B] dark:text-[#94A3B8]">
-            Presenças, compensações e faltas de todos os alunos. Toque em um aluno para abrir a folha completa.
+            Frequência, chamada do dia e alertas de todos os alunos. Toque em um aluno para abrir a folha completa.
           </p>
         </div>
         {!selected && (
@@ -388,109 +588,214 @@ export const PresenceView: React.FC<{ patientId?: string }> = ({ patientId }) =>
 
       {selected ? (
         <div className="space-y-3">
-          <button
-            onClick={() => setSelectedId('')}
-            className="flex items-center gap-1 text-xs font-semibold text-[#426B5B] dark:text-[#7FB39F] hover:underline"
-          >
+          <button onClick={() => setSelectedId('')} className="flex items-center gap-1 text-xs font-semibold text-[#426B5B] dark:text-[#7FB39F] hover:underline">
             <ArrowLeft className="w-4 h-4" /> Todos os alunos
           </button>
           <PresenceSheetPanel key={selected.id} patient={selected} />
         </div>
       ) : (
         <>
-          <div className="flex flex-col sm:flex-row gap-2 sm:items-center sm:justify-between">
-            <div className="relative w-full sm:w-72">
-              <Search className="w-4 h-4 text-[#64748B] absolute left-3 top-1/2 -translate-y-1/2" />
-              <input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Buscar aluno…"
-                aria-label="Buscar aluno"
-                className="w-full pl-9 pr-3 py-2 text-xs bg-white dark:bg-[#141F19] border border-[#E5EAE7] dark:border-[#263730] rounded-lg"
-              />
-            </div>
-            <div className="flex flex-wrap gap-1.5 text-[11px] font-semibold">
-              <span className={`px-2 py-1 rounded-full ${MARK_STYLE.P}`}>Presenças {totals.P}</span>
-              <span className={`px-2 py-1 rounded-full ${MARK_STYLE.C}`}>Compensações {totals.C}</span>
-              <span className={`px-2 py-1 rounded-full ${MARK_STYLE.F}`}>Faltas {totals.F}</span>
-            </div>
+          <div className="flex flex-wrap gap-2" role="group" aria-label="Período">
+            {(Object.keys(PERIOD_LABEL) as Period[]).map((p) => (
+              <button key={p} onClick={() => setPeriod(p)} aria-pressed={period === p} className={chip(period === p)}>
+                {PERIOD_LABEL[p]}
+              </button>
+            ))}
           </div>
 
-          {filtered.length === 0 ? (
-            <div className="p-10 text-center rounded-xl border border-dashed border-[#E5EAE7] dark:border-[#263730] text-sm text-[#64748B]">
-              Nenhum aluno encontrado.
-            </div>
-          ) : (
-            <>
-              {/* phones: cards */}
-              <ul className="md:hidden space-y-2">
-                {filtered.map((s) => (
-                  <li key={s.patient.id}>
-                    <button
-                      onClick={() => setSelectedId(s.patient.id)}
-                      className="w-full text-left p-3 rounded-xl border border-[#E5EAE7] dark:border-[#263730] bg-white dark:bg-[#141F19] space-y-2"
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="font-semibold text-sm">{s.patient.name}</span>
-                        <span className="text-[11px] text-[#64748B]">sessão {s.cyclePos}/30</span>
-                      </div>
-                      <div className="flex flex-wrap gap-1.5 text-[11px] font-semibold">
-                        <span className={`px-2 py-0.5 rounded-full ${MARK_STYLE.P}`}>P {s.P}</span>
-                        <span className={`px-2 py-0.5 rounded-full ${MARK_STYLE.C}`}>C {s.C}</span>
-                        <span className={`px-2 py-0.5 rounded-full ${MARK_STYLE.F}`}>F {s.F}</span>
-                        <span className="px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
-                          {s.patient.sessionsRemaining} restantes
-                        </span>
-                      </div>
-                      <p className="text-[11px] text-[#64748B]">Última presença: {s.last ? formatDate(s.last) : '—'}</p>
-                    </button>
-                  </li>
-                ))}
-              </ul>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <StatCard
+              label="Frequência média"
+              value={overallFreq === null ? '—' : `${overallFreq}%`}
+              hint={overallFreq === null ? 'Sem registros no período' : `${totals.P + totals.C} presenças de ${totals.P + totals.C + totals.F} sessões`}
+              icon={TrendingUp}
+              tone={overallFreq === null || overallFreq >= 80 ? 'green' : overallFreq >= 60 ? 'amber' : 'rose'}
+            />
+            <StatCard label="Presenças" value={totals.P + totals.C} hint={`${totals.P} regulares • ${totals.C} compensações`} icon={CheckCircle2} tone="blue" />
+            <StatCard label="Faltas" value={totals.F} hint={`${repeatAbsent} aluno(s) com 2+ faltas`} icon={XCircle} tone="rose" />
+            <StatCard
+              label="Alunos com alerta"
+              value={withAlerts}
+              hint={`de ${active} ativos • reavaliação, plano, faltas`}
+              icon={AlertTriangle}
+              tone="amber"
+              onClick={() => setOnlyAlerts(true)}
+            />
+          </div>
 
-              {/* larger screens: table */}
-              <div className="hidden md:block overflow-x-auto rounded-xl border border-[#E5EAE7] dark:border-[#263730] bg-white dark:bg-[#141F19]">
-                <table className="w-full text-xs">
-                  <thead className="bg-[#F8FAF9] dark:bg-[#111A15] text-[#64748B] uppercase tracking-wider text-[10px]">
-                    <tr>
-                      <th className="text-left px-4 py-3">Aluno</th>
-                      <th className="px-3 py-3">P</th>
-                      <th className="px-3 py-3">C</th>
-                      <th className="px-3 py-3">Faltas</th>
-                      <th className="px-3 py-3">Sessão no ciclo</th>
-                      <th className="px-3 py-3">Última presença</th>
-                      <th className="px-3 py-3">Restantes no plano</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-[#E5EAE7] dark:divide-[#263730]">
-                    {filtered.map((s) => (
-                      <tr
-                        key={s.patient.id}
-                        onClick={() => setSelectedId(s.patient.id)}
-                        onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), setSelectedId(s.patient.id))}
-                        tabIndex={0}
-                        className="cursor-pointer hover:bg-[#F8FAF9] dark:hover:bg-[#1F332A] focus:outline-none focus:bg-[#E9F1EC] dark:focus:bg-[#1F332A]"
-                      >
-                        <td className="px-4 py-2.5 font-semibold">{s.patient.name}</td>
-                        <td className="px-3 py-2.5 text-center">
-                          <span className={`px-2 py-0.5 rounded-full font-bold ${MARK_STYLE.P}`}>{s.P}</span>
-                        </td>
-                        <td className="px-3 py-2.5 text-center">
-                          <span className={`px-2 py-0.5 rounded-full font-bold ${MARK_STYLE.C}`}>{s.C}</span>
-                        </td>
-                        <td className="px-3 py-2.5 text-center">
-                          <span className={`px-2 py-0.5 rounded-full font-bold ${MARK_STYLE.F}`}>{s.F}</span>
-                        </td>
-                        <td className="px-3 py-2.5 text-center font-mono">{s.cyclePos}/30</td>
-                        <td className="px-3 py-2.5 text-center font-mono">{s.last ? formatDate(s.last) : '—'}</td>
-                        <td className="px-3 py-2.5 text-center">{s.patient.sessionsRemaining}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+          <TodayRollCall />
+
+          <Card
+            title="Alunos"
+            action={<span className="text-[11px] text-[#64748B]">{filtered.length} de {summaries.length}</span>}
+          >
+            <div className="flex flex-col md:flex-row gap-2 md:items-center mb-3">
+              <div className="relative flex-1">
+                <Search className="w-4 h-4 text-[#64748B] absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Buscar aluno…"
+                  aria-label="Buscar aluno"
+                  className="w-full pl-9 pr-3 py-2 text-xs bg-[#F8FAF9] dark:bg-[#111A15] border border-[#E5EAE7] dark:border-[#263730] rounded-lg"
+                />
               </div>
-            </>
-          )}
+              <div className="flex gap-2">
+                <button onClick={() => setOnlyAlerts(!onlyAlerts)} aria-pressed={onlyAlerts} className={chip(onlyAlerts)}>
+                  Só com alertas
+                </button>
+                <select
+                  value={sort}
+                  onChange={(e) => setSort(e.target.value as SortKey)}
+                  aria-label="Ordenar"
+                  className="px-2.5 py-1.5 text-xs font-semibold bg-[#F8FAF9] dark:bg-[#111A15] border border-[#E5EAE7] dark:border-[#263730] rounded-lg"
+                >
+                  <option value="nome">Ordenar: nome</option>
+                  <option value="frequencia">Menor frequência</option>
+                  <option value="faltas">Mais faltas</option>
+                  <option value="ultima">Ausentes há mais tempo</option>
+                </select>
+              </div>
+            </div>
+
+            {filtered.length === 0 ? (
+              <p className="p-8 text-center text-sm text-[#64748B]">Nenhum aluno encontrado.</p>
+            ) : (
+              <>
+                {/* phones: cards */}
+                <ul className="md:hidden space-y-2">
+                  {filtered.map((s) => (
+                    <li key={s.patient.id}>
+                      <button
+                        onClick={() => setSelectedId(s.patient.id)}
+                        className="w-full text-left p-3 rounded-xl border border-[#E5EAE7] dark:border-[#263730] bg-[#F8FAF9] dark:bg-[#111A15] space-y-2.5"
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <Avatar name={s.patient.name} />
+                          <div className="flex-1 min-w-0">
+                            <p className="font-semibold text-sm truncate">{s.patient.name}</p>
+                            <p className="text-[11px] text-[#64748B] truncate">{[s.planName, s.patient.modality].filter(Boolean).join(' • ')}</p>
+                          </div>
+                          <span className="text-right">
+                            <span className="block text-base font-bold">{s.freq === null ? '—' : `${s.freq}%`}</span>
+                            <span className="block text-[10px] text-[#64748B]">frequência</span>
+                          </span>
+                        </div>
+                        <ProgressBar value={s.freq ?? 0} label="Frequência" />
+                        <div className="grid grid-cols-3 gap-2 text-center text-[11px]">
+                          <span className={`rounded-lg py-1 font-semibold ${MARK_STYLE.P}`}>P {s.P}</span>
+                          <span className={`rounded-lg py-1 font-semibold ${MARK_STYLE.C}`}>C {s.C}</span>
+                          <span className={`rounded-lg py-1 font-semibold ${MARK_STYLE.F}`}>F {s.F}</span>
+                        </div>
+                        <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-[11px]">
+                          <dt className="text-[#64748B]">Ciclo</dt>
+                          <dd className="text-right font-semibold">{s.cyclePos}/30</dd>
+                          <dt className="text-[#64748B]">Última presença</dt>
+                          <dd className="text-right font-semibold">{s.last ? formatDate(s.last, 'dd/MM') : '—'}</dd>
+                          <dt className="text-[#64748B]">Próxima sessão</dt>
+                          <dd className="text-right font-semibold">{s.next ? formatDate(s.next.slice(0, 10), 'dd/MM') + ' ' + s.next.slice(11) : '—'}</dd>
+                          <dt className="text-[#64748B]">Sessões restantes</dt>
+                          <dd className="text-right font-semibold">{s.patient.sessionsRemaining}</dd>
+                        </dl>
+                        {s.alertsDetail.length > 0 && (
+                          <div className="flex flex-wrap gap-1">
+                            {s.alertsDetail.map((a) => (
+                              <Pill key={a.label} tone={a.tone} title={a.title}>
+                                {a.label}
+                              </Pill>
+                            ))}
+                          </div>
+                        )}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+
+                {/* larger screens: table */}
+                <div className="hidden md:block overflow-x-auto -mx-3 sm:-mx-4">
+                  <table className="w-full text-xs">
+                    <thead className="bg-[#F8FAF9] dark:bg-[#111A15] text-[#64748B] uppercase tracking-wider text-[10px]">
+                      <tr>
+                        <th className="text-left px-4 py-2.5">Aluno</th>
+                        <th className="text-left px-3 py-2.5 w-36">Frequência</th>
+                        <th className="px-2 py-2.5">P / C / F</th>
+                        <th className="text-left px-3 py-2.5 w-28">Ciclo</th>
+                        <th className="px-3 py-2.5">Última presença</th>
+                        <th className="px-3 py-2.5">Próxima sessão</th>
+                        <th className="px-3 py-2.5">Restantes</th>
+                        <th className="text-left px-3 py-2.5">Alertas</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[#E5EAE7] dark:divide-[#263730]">
+                      {filtered.map((s) => (
+                        <tr
+                          key={s.patient.id}
+                          onClick={() => setSelectedId(s.patient.id)}
+                          onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), setSelectedId(s.patient.id))}
+                          tabIndex={0}
+                          className="cursor-pointer hover:bg-[#F8FAF9] dark:hover:bg-[#1F332A] focus:outline-none focus:bg-[#E9F1EC] dark:focus:bg-[#1F332A]"
+                        >
+                          <td className="px-4 py-2.5">
+                            <div className="flex items-center gap-2.5">
+                              <Avatar name={s.patient.name} size="sm" />
+                              <div className="min-w-0">
+                                <p className="font-semibold truncate">{s.patient.name}</p>
+                                <p className="text-[11px] text-[#64748B] truncate">{[s.planName, s.patient.modality].filter(Boolean).join(' • ')}</p>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-3 py-2.5">
+                            <div className="flex items-center gap-2">
+                              <ProgressBar value={s.freq ?? 0} label="Frequência" />
+                              <span className="w-9 text-right font-bold">{s.freq === null ? '—' : `${s.freq}%`}</span>
+                            </div>
+                          </td>
+                          <td className="px-2 py-2.5 text-center whitespace-nowrap">
+                            <span className={`px-1.5 rounded font-bold ${MARK_STYLE.P}`}>{s.P}</span>{' '}
+                            <span className={`px-1.5 rounded font-bold ${MARK_STYLE.C}`}>{s.C}</span>{' '}
+                            <span className={`px-1.5 rounded font-bold ${MARK_STYLE.F}`}>{s.F}</span>
+                          </td>
+                          <td className="px-3 py-2.5">
+                            <div className="flex items-center gap-2">
+                              <ProgressBar value={s.cyclePos} max={30} tone="blue" label="Ciclo de 30 sessões" />
+                              <span className="font-mono text-[11px]">{s.cyclePos}/30</span>
+                            </div>
+                          </td>
+                          <td className="px-3 py-2.5 text-center">
+                            {s.last ? (
+                              <>
+                                <span className="font-mono">{formatDate(s.last)}</span>
+                                <span className="block text-[10px] text-[#64748B]">há {daysBetween(s.last, todayKey())} dia(s)</span>
+                              </>
+                            ) : (
+                              '—'
+                            )}
+                          </td>
+                          <td className="px-3 py-2.5 text-center font-mono">
+                            {s.next ? `${formatDate(s.next.slice(0, 10), 'dd/MM')} ${s.next.slice(11)}` : '—'}
+                          </td>
+                          <td className="px-3 py-2.5 text-center font-semibold">{s.patient.sessionsRemaining}</td>
+                          <td className="px-3 py-2.5">
+                            <div className="flex flex-wrap gap-1">
+                              {s.alertsDetail.length === 0 ? (
+                                <Pill tone="green">Em dia</Pill>
+                              ) : (
+                                s.alertsDetail.map((a) => (
+                                  <Pill key={a.label} tone={a.tone} title={a.title}>
+                                    {a.label}
+                                  </Pill>
+                                ))
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+          </Card>
         </>
       )}
     </div>

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ClipboardCheck,
   FileUp,
@@ -18,8 +18,12 @@ import {
   Download,
   Save,
   RotateCcw,
+  Users,
+  AlertTriangle,
+  CalendarClock,
 } from 'lucide-react';
 import { downloadEvaluationPdf } from '../../lib/pdf';
+import { StatCard, Avatar, ProgressBar, Pill, Card, daysBetween } from '../common/Insights';
 import { clinicStorage } from '../../lib/storage';
 import { formatDate, printElement } from '../../lib/utils';
 import {
@@ -447,7 +451,11 @@ const EvaluationFormBody: React.FC<{ rec: EvaluationRecord; setRec: React.Dispat
 }) => (
   <>
     {rec.sections.map((sec) => (
-      <section key={sec.id} className="rounded-xl border border-[#E5EAE7] dark:border-[#273830] bg-white dark:bg-[#17231D] p-3 sm:p-4">
+      <section
+        key={sec.id}
+        id={`ev-sec-${sec.id}`}
+        className="scroll-mt-32 rounded-xl border border-[#E5EAE7] dark:border-[#273830] bg-white dark:bg-[#17231D] p-3 sm:p-4"
+      >
         <h3 className="text-sm font-bold mb-3">{sec.title}</h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {sec.fields.map((fl) => (
@@ -499,6 +507,219 @@ function newRecord(tpl: EvaluationTemplate, patient: Patient): EvaluationRecord 
   };
 }
 
+const REEVALUATION_DAYS = 90;
+const LEVEL_TONE: Record<string, 'green' | 'amber' | 'rose'> = { basico: 'green', intermediario: 'amber', avancado: 'rose' };
+const ageOf = (birth?: string) =>
+  birth ? Math.floor((Date.now() - new Date(birth + 'T00:00:00').getTime()) / 31557600000) : undefined;
+
+/** What the section shows before a student is picked: indicators, recent evaluations and pending students */
+const EvaluationDashboard: React.FC<{
+  patients: Patient[];
+  onEvaluate: (patientId: string) => void;
+  onOpen: (r: EvaluationRecord) => void;
+}> = ({ patients, onEvaluate, onOpen }) => {
+  const { showToast } = useToast();
+  const [all, setAll] = useState<EvaluationRecord[]>([]);
+  useEffect(() => {
+    const load = () => setAll(clinicStorage.getEvaluations());
+    load();
+    return clinicStorage.subscribe(load);
+  }, []);
+
+  const today = new Date().toISOString().slice(0, 10);
+  const monthStart = today.slice(0, 8) + '01';
+  const latestByPatient = new Map<string, EvaluationRecord>();
+  all.forEach((r) => {
+    const cur = latestByPatient.get(r.patientId);
+    if (!cur || r.date > cur.date) latestByPatient.set(r.patientId, r);
+  });
+  const active = patients.filter((p) => p.status === 'ativo');
+  const never = active.filter((p) => !latestByPatient.has(p.id));
+  const overdue = active.filter((p) => {
+    const last = latestByPatient.get(p.id);
+    return last && daysBetween(last.date, today) > REEVALUATION_DAYS;
+  });
+  const levelCounts = { basico: 0, intermediario: 0, avancado: 0 } as Record<string, number>;
+  latestByPatient.forEach((r) => {
+    const lv = computeMovementLevel(r.sections, r.values);
+    if (lv) levelCounts[lv.level]++;
+  });
+  const leveled = levelCounts.basico + levelCounts.intermediario + levelCounts.avancado;
+  const pending = [
+    ...never.map((p) => ({ p, reason: 'Nunca avaliado', tone: 'rose' as const })),
+    ...overdue.map((p) => ({
+      p,
+      reason: `Última há ${daysBetween(latestByPatient.get(p.id)!.date, today)} dias`,
+      tone: 'amber' as const,
+    })),
+  ];
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <StatCard label="Avaliações no mês" value={all.filter((r) => r.date >= monthStart).length} hint={`${all.length} no total`} icon={ClipboardCheck} />
+        <StatCard
+          label="Alunos avaliados"
+          value={`${active.length ? Math.round(((active.length - never.length) / active.length) * 100) : 0}%`}
+          hint={`${active.length - never.length} de ${active.length} alunos ativos`}
+          icon={Users}
+          tone="blue"
+        />
+        <StatCard label="Sem avaliação" value={never.length} hint="alunos ativos nunca avaliados" icon={AlertTriangle} tone="rose" />
+        <StatCard label="Reavaliação vencida" value={overdue.length} hint={`última avaliação há mais de ${REEVALUATION_DAYS} dias`} icon={CalendarClock} tone="amber" />
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <Card title="Avaliações recentes" className="lg:col-span-2">
+          {all.length === 0 ? (
+            <p className="text-xs text-[#64748B] py-6 text-center">Nenhuma avaliação registrada ainda. Selecione um aluno acima para começar.</p>
+          ) : (
+            <ul className="divide-y divide-[#E5EAE7] dark:divide-[#273830]">
+              {all.slice(0, 8).map((r) => {
+                const lv = computeMovementLevel(r.sections, r.values);
+                return (
+                  <li key={r.id} className="py-2.5 flex items-center gap-3">
+                    <Avatar name={r.patientName} size="sm" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold truncate">{r.patientName}</p>
+                      <p className="text-[11px] text-[#64748B] truncate">
+                        {formatDate(r.date)} • {r.templateName} • {r.professionalName}
+                      </p>
+                    </div>
+                    {lv && <Pill tone={LEVEL_TONE[lv.level]}>{LEVEL_LABEL[lv.level]}</Pill>}
+                    <div className="flex">
+                      <button onClick={() => onOpen(r)} className={iconBtn} aria-label={`Abrir avaliação de ${r.patientName}`}>
+                        <Pencil className="w-4 h-4" />
+                      </button>
+                      <button onClick={() => savePdf(r, showToast)} className={iconBtn} aria-label={`Baixar PDF de ${r.patientName}`}>
+                        <Download className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </Card>
+
+        <Card title="Nível dos alunos">
+          {leveled === 0 ? (
+            <p className="text-xs text-[#64748B] py-6 text-center">O nível aparece quando a Avaliação do Movimento é preenchida.</p>
+          ) : (
+            <div className="space-y-3">
+              {(['basico', 'intermediario', 'avancado'] as const).map((lv) => (
+                <div key={lv}>
+                  <div className="flex justify-between text-xs mb-1">
+                    <span className="font-semibold">{LEVEL_LABEL[lv]}</span>
+                    <span className="text-[#64748B]">
+                      {levelCounts[lv]} aluno(s) • {Math.round((levelCounts[lv] / leveled) * 100)}%
+                    </span>
+                  </div>
+                  <ProgressBar value={levelCounts[lv]} max={leveled} tone={LEVEL_TONE[lv]} label={LEVEL_LABEL[lv]} />
+                </div>
+              ))}
+              <p className="text-[11px] text-[#64748B]">Pela avaliação mais recente de cada aluno.</p>
+            </div>
+          )}
+        </Card>
+      </div>
+
+      <Card title="Pendências" action={<span className="text-[11px] text-[#64748B]">{pending.length} aluno(s)</span>}>
+        {pending.length === 0 ? (
+          <p className="text-xs text-[#64748B] py-4 text-center">Todos os alunos ativos estão com a avaliação em dia.</p>
+        ) : (
+          <ul className="grid grid-cols-1 md:grid-cols-2 gap-2">
+            {pending.map(({ p, reason, tone }) => (
+              <li key={p.id} className="p-2.5 rounded-lg border border-[#E5EAE7] dark:border-[#273830] flex items-center gap-2.5">
+                <Avatar name={p.name} size="sm" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold truncate">{p.name}</p>
+                  <Pill tone={tone}>{reason}</Pill>
+                </div>
+                <button onClick={() => onEvaluate(p.id)} className={btnPrimary}>
+                  Avaliar
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
+    </div>
+  );
+};
+
+/** Student header above the ficha: who they are, plan, clinical alerts and level history */
+const PatientEvalSummary: React.FC<{ patient: Patient; history: EvaluationRecord[] }> = ({ patient, history }) => {
+  const plan = clinicStorage.getPlans().find((pl) => pl.id === patient.activePlanId);
+  const age = ageOf(patient.birthDate);
+  const chronological = [...history].sort((a, b) => a.date.localeCompare(b.date));
+  const levels = chronological
+    .map((r) => ({ r, lv: computeMovementLevel(r.sections, r.values) }))
+    .filter((x) => x.lv);
+  const last = history[0];
+  const today = new Date().toISOString().slice(0, 10);
+  const overdue = last && daysBetween(last.date, today) > REEVALUATION_DAYS;
+
+  return (
+    <div className="p-3 sm:p-4 rounded-xl bg-white dark:bg-[#17231D] border border-[#E5EAE7] dark:border-[#273830] grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)] gap-4">
+      <div className="flex items-start gap-3 min-w-0">
+        <Avatar name={patient.name} size="lg" />
+        <div className="min-w-0 space-y-1">
+          <p className="font-bold text-base truncate">{patient.name}</p>
+          <p className="text-[11px] text-[#64748B]">
+            {[age !== undefined && `${age} anos`, patient.phone, patient.modality].filter(Boolean).join(' • ')}
+          </p>
+          <p className="text-[11px] text-[#64748B]">
+            {plan ? `${plan.name} • ` : ''}
+            {patient.sessionsRemaining} sessões restantes
+          </p>
+          {patient.clinicalAlerts && patient.clinicalAlerts.length > 0 && (
+            <div className="flex flex-wrap gap-1 pt-1">
+              {patient.clinicalAlerts.map((a) => (
+                <Pill key={a} tone="rose" title="Alerta clínico do cadastro">
+                  <AlertTriangle className="w-3 h-3" /> {a}
+                </Pill>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+      <dl className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
+        <div>
+          <dt className="text-[#64748B]">Avaliações</dt>
+          <dd className="text-lg font-bold">{history.length}</dd>
+        </div>
+        <div>
+          <dt className="text-[#64748B]">Última avaliação</dt>
+          <dd className="text-sm font-bold mt-1">{last ? formatDate(last.date) : '—'}</dd>
+          {last && (
+            <span className={`text-[10px] ${overdue ? 'text-amber-600 font-semibold' : 'text-[#64748B]'}`}>
+              há {daysBetween(last.date, today)} dias{overdue ? ' • reavaliar' : ''}
+            </span>
+          )}
+        </div>
+        <div className="col-span-2 sm:col-span-1">
+          <dt className="text-[#64748B]">Evolução do nível</dt>
+          <dd className="mt-1 flex flex-wrap items-center gap-1">
+            {levels.length === 0 ? (
+              <span className="text-sm font-bold">—</span>
+            ) : (
+              levels.slice(-4).map(({ r, lv }, i) => (
+                <React.Fragment key={r.id}>
+                  {i > 0 && <span className="text-[#94A3B8]">→</span>}
+                  <Pill tone={LEVEL_TONE[lv!.level]} title={formatDate(r.date)}>
+                    {LEVEL_LABEL[lv!.level]}
+                  </Pill>
+                </React.Fragment>
+              ))
+            )}
+          </dd>
+        </div>
+      </dl>
+    </div>
+  );
+};
+
 /**
  * The Avaliação section: pick the student and the ficha, fill it in on the page, save it and
  * download the PDF. Earlier evaluations of the student are listed below to reopen.
@@ -535,12 +756,33 @@ const EvaluationWorkspace: React.FC<{ patients: Patient[]; templates: Evaluation
     setRec(r);
     setSavedSnapshot(r && clinicStorage.getEvaluations(r.patientId).some((e) => e.id === r.id) ? JSON.stringify([r.values, r.details, r.date]) : '');
   };
+  // a record chosen on the dashboard opens instead of a blank ficha
+  const pendingOpen = useRef<EvaluationRecord | null>(null);
   // a new blank (prefilled) ficha whenever the student or the ficha changes
   useEffect(() => {
+    const pending = pendingOpen.current;
+    pendingOpen.current = null;
+    if (pending && pending.patientId === patientId) {
+      open({ ...pending, sections: cloneSections(pending.sections) });
+      return;
+    }
     const tpl = templates.find((t) => t.id === templateId);
     open(patient && tpl ? newRecord(tpl, patient) : null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [patientId, templateId]);
+
+  const openExisting = (r: EvaluationRecord) => {
+    if (!confirmDiscard()) return;
+    if (r.patientId === patientId) open({ ...r, sections: cloneSections(r.sections) });
+    else {
+      pendingOpen.current = r;
+      setPatientId(r.patientId);
+    }
+  };
+
+  const allFields = rec ? rec.sections.flatMap((s) => s.fields) : [];
+  const filledCount = rec ? allFields.filter((fl) => (rec.values[fl.id] || '').trim() !== '').length : 0;
+  const filledPct = allFields.length ? Math.round((filledCount / allFields.length) * 100) : 0;
 
   const confirmDiscard = () => !dirty || window.confirm('Há alterações não salvas nesta avaliação. Descartar?');
 
@@ -608,17 +850,23 @@ const EvaluationWorkspace: React.FC<{ patients: Patient[]; templates: Evaluation
         )}
       </div>
 
-      {!rec ? (
-        <div className="p-10 text-center rounded-xl border border-dashed border-[#E5EAE7] dark:border-[#263730] text-sm text-[#64748B]">
-          Selecione o aluno para preencher a avaliação.
-        </div>
+      {!rec || !patient ? (
+        <EvaluationDashboard patients={patients} onEvaluate={(id) => setPatientId(id)} onOpen={openExisting} />
       ) : (
         <>
+          <PatientEvalSummary patient={patient} history={history} />
+
           {/* actions stay visible while scrolling the ficha */}
-          <div className="sticky top-0 z-10 -mx-1 px-1 py-2 bg-[#F6F8F7]/95 dark:bg-[#0C130F]/95 backdrop-blur flex flex-wrap items-center gap-2">
-            <span className="text-xs text-[#64748B] flex-1 min-w-[10rem]">
-              {savedSnapshot ? (dirty ? 'Alterações não salvas' : 'Salva') : 'Nova avaliação (ainda não salva)'} • {rec.professionalName}
-            </span>
+          <div className="sticky top-0 z-10 -mx-1 px-1 py-2 bg-[#F6F8F7]/95 dark:bg-[#0C130F]/95 backdrop-blur space-y-2">
+            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex-1 min-w-[10rem]">
+              <span className="block text-xs text-[#64748B]">
+                {savedSnapshot ? (dirty ? 'Alterações não salvas' : 'Salva') : 'Nova avaliação (ainda não salva)'} • {filledCount}/{allFields.length} itens ({filledPct}%)
+              </span>
+              <div className="mt-1 max-w-xs">
+                <ProgressBar value={filledPct} tone="blue" label="Ficha preenchida" />
+              </div>
+            </div>
             <button
               onClick={() => {
                 if (!confirmDiscard()) return;
@@ -635,6 +883,27 @@ const EvaluationWorkspace: React.FC<{ patients: Patient[]; templates: Evaluation
             <button onClick={handlePdf} disabled={busy} className={`${btnPrimary} disabled:opacity-60`}>
               {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />} Baixar PDF
             </button>
+            </div>
+            {/* jump to a part of the ficha, with how much of it is filled */}
+            <nav aria-label="Seções da ficha" className="flex gap-1.5 overflow-x-auto pb-1 -mx-1 px-1">
+              {rec.sections.map((sec) => {
+                const done = sec.fields.filter((fl) => (rec.values[fl.id] || '').trim() !== '').length;
+                const complete = done === sec.fields.length;
+                return (
+                  <button
+                    key={sec.id}
+                    onClick={() => document.getElementById(`ev-sec-${sec.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                    className={`shrink-0 px-2.5 py-1 rounded-full text-[11px] font-semibold border ${
+                      complete
+                        ? 'bg-emerald-50 border-emerald-200 text-emerald-800 dark:bg-emerald-950/50 dark:border-emerald-900 dark:text-emerald-300'
+                        : 'bg-white dark:bg-[#141F19] border-[#E5EAE7] dark:border-[#263730] text-[#64748B] dark:text-[#9AA8B6]'
+                    }`}
+                  >
+                    {sec.title} <span className="opacity-70">{done}/{sec.fields.length}</span>
+                  </button>
+                );
+              })}
+            </nav>
           </div>
 
           <div className="space-y-4">

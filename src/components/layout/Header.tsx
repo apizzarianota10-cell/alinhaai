@@ -35,14 +35,17 @@ const SECTION_LABELS: Record<string, string> = {
   patients: 'Pacientes',
   attendance: 'Atendimentos',
   exercises: 'Exercícios',
-  planning: 'Planejamento',
+  planning: 'Fichas de treino',
   records: 'Prontuários',
+  evaluations: 'Avaliações',
+  presence: 'Presença',
   financial: 'Financeiro',
+  plans: 'Planos e Áreas',
   birthdays: 'Aniversariantes',
   reports: 'Relatórios',
-  professionals: 'Profissionais',
+  professionals: 'Equipe',
   settings: 'Configurações',
-  tutorial: 'Tutorial & Ajuda',
+  tutorial: 'Ajuda',
 };
 
 export const Header: React.FC<HeaderProps> = ({
