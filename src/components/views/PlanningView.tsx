@@ -633,7 +633,7 @@ export const PlanningView: React.FC<PlanningViewProps> = ({ onNavigate, patientI
               </select>
               {(() => {
                 const ex = exercises.find((e) => e.id === addExId);
-                const preview = ex?.gifUrl || ex?.steps[0]?.imageUrl;
+                const preview = ex?.photo?.url || ex?.gifUrl || ex?.steps[0]?.imageUrl;
                 return preview ? (
                   <div className="mt-2 flex gap-3 items-start p-2 rounded-lg bg-[#F8FAF9] dark:bg-[#111A15] border border-[#E5EAE7] dark:border-[#273830]">
                     <img src={preview} alt={ex!.name} className="w-32 aspect-[3/2] object-cover rounded-md" />

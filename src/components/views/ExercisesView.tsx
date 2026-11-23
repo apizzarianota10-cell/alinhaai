@@ -360,7 +360,7 @@ export const ExercisesView: React.FC<ExercisesViewProps> = ({
             Biblioteca Inteligente de Exercícios
           </h1>
           <p className="text-xs sm:text-sm text-[#64748B] dark:text-[#9AA8B6]">
-            Catálogo técnico com demonstração animada em 3 fases: inicial, intermediária e final.
+            Repertório de Pilates por nível, com fotos reais, as fases do movimento, variações e contraindicações.
           </p>
         </div>
 
@@ -477,9 +477,9 @@ export const ExercisesView: React.FC<ExercisesViewProps> = ({
           </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {block.items.map((ex) => {
-            const cover = ex.steps[0]?.imageUrl;
-            // hovering a card plays its GIF (or the uploaded final frame) as a preview
-            const preview = hoveredId === ex.id ? ex.gifUrl || ex.steps[2]?.imageUrl || cover : cover;
+            const cover = ex.photo?.url || ex.steps[0]?.imageUrl;
+            // a real photo stays as the cover; otherwise hovering plays the GIF (or the uploaded final frame)
+            const preview = ex.photo ? ex.photo.url : hoveredId === ex.id ? ex.gifUrl || ex.steps[2]?.imageUrl || cover : cover;
             return (
               <div
                 key={ex.id}
@@ -497,6 +497,7 @@ export const ExercisesView: React.FC<ExercisesViewProps> = ({
                       src={preview}
                       alt={`Demonstração de ${ex.name}`}
                       loading="lazy"
+                      style={ex.photo?.position ? { objectPosition: ex.photo.position } : undefined}
                       className="w-full h-full object-cover group-hover:scale-[1.02] transition-transform duration-500"
                     />
                   ) : (
@@ -511,7 +512,11 @@ export const ExercisesView: React.FC<ExercisesViewProps> = ({
                   <span className={`absolute bottom-2 right-2 text-[10px] font-bold px-2 py-0.5 rounded-full ${LEVEL_BADGE[getExerciseLevel(ex)]}`}>
                     {LEVEL_LABEL[getExerciseLevel(ex)]}
                   </span>
-                  {ex.gifUrl || ex.mediaSource === 'upload' ? (
+                  {ex.photo ? (
+                    <span className="absolute bottom-2 left-2 flex items-center gap-1 text-[10px] font-semibold text-white bg-black/55 px-2 py-0.5 rounded-full">
+                      <Camera className="w-2.5 h-2.5" /> Foto real
+                    </span>
+                  ) : ex.gifUrl || ex.mediaSource === 'upload' ? (
                     <span className="absolute bottom-2 left-2 flex items-center gap-1 text-[10px] font-semibold text-white bg-black/55 px-2 py-0.5 rounded-full">
                       <Play className="w-2.5 h-2.5 fill-current" /> 3 fases
                     </span>
@@ -558,7 +563,49 @@ export const ExercisesView: React.FC<ExercisesViewProps> = ({
           maxWidth="3xl"
         >
           <div className="space-y-4">
+            {selectedExercise.photo && (
+              <figure className="rounded-2xl overflow-hidden border border-[#E5EAE7] dark:border-[#263730] bg-[#0C130F]">
+                <img
+                  src={selectedExercise.photo.url}
+                  alt={`${selectedExercise.name} — foto do exercício`}
+                  className="w-full max-h-[60vh] object-contain"
+                />
+                <figcaption className="px-3 py-2 text-[11px] bg-white dark:bg-[#141F19] text-[#64748B] dark:text-[#9AA8B6] flex flex-wrap gap-x-1.5">
+                  <Camera className="w-3.5 h-3.5 shrink-0 self-center" />
+                  <span>
+                    Foto: <b className="text-[#17231D] dark:text-[#F1F5F3]">{selectedExercise.photo.author}</b>
+                  </span>
+                  <span>•</span>
+                  {selectedExercise.photo.licenseUrl ? (
+                    <a href={selectedExercise.photo.licenseUrl} target="_blank" rel="noreferrer" className="underline hover:text-[#426B5B]">
+                      {selectedExercise.photo.license}
+                    </a>
+                  ) : (
+                    <span>{selectedExercise.photo.license}</span>
+                  )}
+                  <span>•</span>
+                  <a href={selectedExercise.photo.sourceUrl} target="_blank" rel="noreferrer" className="underline hover:text-[#426B5B]">
+                    ver original
+                  </a>
+                </figcaption>
+              </figure>
+            )}
+
+            {selectedExercise.photo && !hasImages && (
+              <ol className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                {selectedExercise.steps.map((s, i) => (
+                  <li key={i} className="p-3 rounded-xl border border-[#E5EAE7] dark:border-[#263730] bg-white dark:bg-[#141F19]">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-[#426B5B] dark:text-[#7FB39F]">
+                      Fase {i + 1} • {s.title}
+                    </span>
+                    <p className="text-xs text-[#475569] dark:text-[#9AA8B6] mt-1">{s.description}</p>
+                  </li>
+                ))}
+              </ol>
+            )}
+
             {/* Visual Sequence Player */}
+            {(hasImages || !selectedExercise.photo) && (
             <div className="rounded-2xl overflow-hidden border border-[#E5EAE7] dark:border-[#263730] bg-[#F8FAF9] dark:bg-[#111A15]">
               <div className="relative aspect-[3/2] bg-[#E9EFEC] dark:bg-[#0C130F]">
                 {hasImages ? (
@@ -645,10 +692,13 @@ export const ExercisesView: React.FC<ExercisesViewProps> = ({
                 </div>
               </div>
             </div>
+            )}
 
             {/* Media credit & actions */}
             <div className="flex flex-wrap items-center justify-between gap-2 text-[11px]">
-              <span className="text-[#64748B] dark:text-[#9AA8B6]">{selectedExercise.mediaCredit || 'Sem mídia cadastrada'}</span>
+              <span className="text-[#64748B] dark:text-[#9AA8B6]">
+                {hasImages ? selectedExercise.mediaCredit || '' : selectedExercise.photo ? '' : 'Sem mídia cadastrada'}
+              </span>
               <div className="flex items-center gap-2">
                 {selectedExercise.gifUrl && (
                   <a

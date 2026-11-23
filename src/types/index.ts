@@ -231,6 +231,8 @@ export interface Exercise {
   /** Where the step images come from */
   mediaSource?: 'foto' | 'ilustracao' | 'upload';
   mediaCredit?: string;
+  /** Real photo of the exercise (free licence, with credit) */
+  photo?: ExercisePhoto;
   animationSvgType?: 'reformer_movement' | 'chair_stretch' | 'mat_teaser' | 'spine_mobility';
   reviewedByProfessional: boolean;
   isFavorite?: boolean;
@@ -482,4 +484,15 @@ export interface BirthdayGreeting {
   year: number;
   date: string; // YYYY-MM-DD
   by?: string;
+}
+
+/** A real photograph of an exercise with the attribution its free licence requires */
+export interface ExercisePhoto {
+  url: string;
+  author: string;
+  license: string;
+  licenseUrl?: string;
+  sourceUrl: string;
+  /** CSS object-position used when the photo is cropped into a card */
+  position?: string;
 }
