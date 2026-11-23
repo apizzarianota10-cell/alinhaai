@@ -821,7 +821,7 @@ export const ScheduleView: React.FC<ScheduleViewProps> = ({ onNavigate, initialA
               <ChevronRight className="w-4 h-4" />
             </button>
           </div>
-          <span className="font-bold text-sm sm:text-base capitalize flex-1 min-w-[10rem]">{periodLabel}</span>
+          <span className="font-bold text-sm sm:text-base flex-1 min-w-[10rem]">{periodLabel.replace(/^./, (c) => c.toUpperCase())}</span>
           <div className="w-full sm:w-auto flex items-center bg-[#F8FAF9] dark:bg-[#111A15] p-1 border border-[#E5EAE7] dark:border-[#273830] rounded-lg">
             {viewBtn('day', 'Dia')}
             {viewBtn('week', 'Semana')}
