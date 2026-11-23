@@ -120,7 +120,7 @@ export const SettingsView: React.FC<{ onNavigate?: (section: string) => void }> 
           Configurações da Clínica
         </h1>
         <p className="text-xs sm:text-sm text-[#64748B] dark:text-[#94A3B8]">
-          Informações da unidade, regras de reposição, planos personalizáveis e modelo de mensagem de aniversário.
+          Dados da clínica, horários, regras de reposição, mensagem de aniversário e backup.
         </p>
       </div>
 
@@ -292,17 +292,21 @@ export const SettingsView: React.FC<{ onNavigate?: (section: string) => void }> 
 
           {/* Modalities Offered */}
           <div className="pt-3 border-t border-[#E5EAE7] dark:border-[#273830] space-y-2">
-            <span className="font-bold text-[#17231D] dark:text-[#F1F5F3] block">
-              Modalidades Terapêuticas Habilitadas na Clínica:
-            </span>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="font-bold text-[#17231D] dark:text-[#F1F5F3]">Áreas de atendimento ativas</span>
+              <button type="button" onClick={() => onNavigate?.('plans')} className="text-[11px] font-semibold text-[#426B5B] dark:text-[#7FB39F] hover:underline">
+                Gerenciar em Planos e Áreas
+              </button>
+            </div>
             <div className="flex flex-wrap gap-2">
-              {['Pilates Clínico Individual', 'Fisioterapia Traumato-Ortopédica', 'Quiropraxia & Ajuste Postural', 'Reabilitação de Coluna'].map((mod, i) => (
+              {clinicStorage.getServiceAreas(true).map((area) => (
                 <span
-                  key={i}
+                  key={area.id}
                   className="px-3 py-1.5 rounded-lg border border-emerald-300 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-200 text-xs font-semibold flex items-center gap-1.5"
                 >
                   <Check className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>{mod}</span>
+                  <span>{area.name}</span>
+                  {area.allowsGroups && <span className="font-normal opacity-80">• turmas até {area.defaultCapacity || 1}</span>}
                 </span>
               ))}
             </div>

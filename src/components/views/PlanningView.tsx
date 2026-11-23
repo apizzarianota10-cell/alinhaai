@@ -12,6 +12,8 @@ import {
   Calendar,
   Layers,
   ArrowRight,
+  Users,
+  AlertTriangle,
 } from 'lucide-react';
 import { clinicStorage } from '../../lib/storage';
 import { EXERCISE_LEVELS, getExerciseLevel } from '../../lib/pilatesCatalog';
@@ -21,6 +23,7 @@ import { formatDate, toLocalDateKey, printElement } from '../../lib/utils';
 const dayLabel = (day: string) => (day === 'Sábado' ? day : `${day}-feira`);
 import { WorkoutPlan, WorkoutItem, Patient, Exercise } from '../../types';
 import { Modal } from '../common/Modal';
+import { StatCard, Avatar } from '../common/Insights';
 import { useToast } from '../common/Toast';
 
 interface PlanningViewProps {
@@ -97,11 +100,12 @@ export const PlanningView: React.FC<PlanningViewProps> = ({ onNavigate, patientI
     if (initialPatientId && initialPatientId !== 'all') setSelectedPatientId(initialPatientId);
   }, [initialPatientId]);
 
-  const openNewPlanModal = () => {
+  const openNewPlanModal = (forPatient?: unknown) => {
     setEditingPlan(null);
     setActiveTabDay('Segunda');
-    // Start from the patient currently filtered, if any
-    const defaultPat = selectedPatientId !== 'all' ? selectedPatientId : patients[0]?.id || '';
+    // a specific student (from "sem ficha"), else the patient currently filtered, else the first one
+    const defaultPat =
+      typeof forPatient === 'string' ? forPatient : selectedPatientId !== 'all' ? selectedPatientId : patients[0]?.id || '';
     setFormPatientId(defaultPat);
     const patName = patients.find((p) => p.id === defaultPat)?.name || 'Paciente';
     setFormTitle(`Ficha de Pilates Individual - ${patName}`);
@@ -260,36 +264,76 @@ export const PlanningView: React.FC<PlanningViewProps> = ({ onNavigate, patientI
 
   return (
     <div className="space-y-4">
-      {/* Top Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div>
-          <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-[#17231D] dark:text-[#F1F5F3]">
-            Planejamento Individual de Exercícios
-          </h1>
-          <p className="text-xs sm:text-sm text-[#64748B] dark:text-[#94A3B8]">
-            Construção de fichas semanais personalizadas, seleção de aparelhos, molas e séries.
-          </p>
-        </div>
+      {/* Header */}
+      {(() => {
+        const active = workoutPlans.filter((w) => w.active);
+        const activePatients = patients.filter((p) => p.status === 'ativo');
+        const withPlan = new Set(active.map((w) => w.patientId));
+        const missing = activePatients.filter((p) => !withPlan.has(p.id));
+        const prescribed = active.reduce((n, w) => n + w.weeklyDays.reduce((m, d) => m + (d.enabled ? d.items.length : 0), 0), 0);
+        return (
+          <>
+            <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
+              <div>
+                <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-[#17231D] dark:text-[#F1F5F3] flex items-center gap-2">
+                  <ClipboardList className="w-6 h-6 text-[#426B5B] dark:text-[#7FB39F]" /> Fichas de treino
+                </h1>
+                <p className="text-xs sm:text-sm text-[#64748B] dark:text-[#94A3B8]">Fichas semanais por aluno: exercícios, aparelhos, molas, séries e repetições.</p>
+              </div>
+              <button
+                onClick={() => openNewPlanModal()}
+                className="self-start sm:self-auto flex items-center gap-1.5 px-4 py-2 bg-[#426B5B] hover:bg-[#345648] text-white text-xs sm:text-sm font-semibold rounded-lg shadow-sm"
+              >
+                <Plus className="w-4 h-4" /> Nova ficha
+              </button>
+            </div>
 
-        <button
-          onClick={openNewPlanModal}
-          className="flex items-center gap-1.5 px-3.5 py-2 bg-[#426B5B] hover:bg-[#345648] text-white text-xs sm:text-sm font-semibold rounded-lg shadow-sm"
-        >
-          <Plus className="w-4 h-4" />
-          <span>Nova Ficha Individual</span>
-        </button>
-      </div>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              <StatCard label="Fichas ativas" value={active.length} hint={`${workoutPlans.length - active.length} arquivada(s)`} icon={ClipboardList} />
+              <StatCard
+                label="Alunos com ficha"
+                value={`${activePatients.length ? Math.round((withPlan.size / activePatients.length) * 100) : 0}%`}
+                hint={`${withPlan.size} de ${activePatients.length} alunos ativos`}
+                icon={Users}
+                tone="blue"
+              />
+              <StatCard label="Exercícios prescritos" value={prescribed} hint="somando os dias das fichas ativas" icon={Dumbbell} tone="slate" />
+              <StatCard label="Sem ficha" value={missing.length} hint={missing.length ? 'alunos ativos aguardando ficha' : 'todos com ficha'} icon={AlertTriangle} tone={missing.length ? 'amber' : 'green'} />
+            </div>
+
+            {missing.length > 0 && (
+              <div className="p-3 rounded-xl border border-amber-200 dark:border-amber-900 bg-amber-50/60 dark:bg-amber-950/20">
+                <p className="text-xs font-bold text-amber-800 dark:text-amber-300 mb-2">Alunos ativos sem ficha de treino</p>
+                <div className="flex flex-wrap gap-2">
+                  {missing.map((p) => (
+                    <button
+                      key={p.id}
+                      onClick={() => openNewPlanModal(p.id)}
+                      className="flex items-center gap-2 pl-1 pr-3 py-1 rounded-full bg-white dark:bg-[#17231D] border border-[#E5EAE7] dark:border-[#273830] hover:border-[#426B5B] text-xs font-semibold"
+                      title="Criar ficha"
+                    >
+                      <Avatar name={p.name} size="sm" /> {p.name.split(' ').slice(0, 2).join(' ')}
+                      <Plus className="w-3.5 h-3.5 text-[#426B5B] dark:text-[#7FB39F]" />
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
+        );
+      })()}
 
       {/* Filter by patient */}
-      <div className="p-3 bg-white dark:bg-[#17231D] border border-[#E5EAE7] dark:border-[#273830] rounded-xl flex items-center justify-between gap-3 shadow-xs">
+      <div className="p-3 bg-white dark:bg-[#17231D] border border-[#E5EAE7] dark:border-[#273830] rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-xs">
         <div className="flex items-center gap-2 text-xs">
-          <span className="text-[#64748B] font-semibold">Filtrar por Paciente:</span>
+          <span className="text-[#64748B] font-semibold shrink-0">Aluno:</span>
           <select
             value={selectedPatientId}
             onChange={(e) => setSelectedPatientId(e.target.value)}
-            className="bg-[#F8FAF9] dark:bg-[#111A15] border border-[#E5EAE7] dark:border-[#273830] rounded-lg px-2.5 py-1.5 font-medium"
+            aria-label="Filtrar por aluno"
+            className="flex-1 bg-[#F8FAF9] dark:bg-[#111A15] border border-[#E5EAE7] dark:border-[#273830] rounded-lg px-2.5 py-1.5 font-medium"
           >
-            <option value="all">Todos os Pacientes</option>
+            <option value="all">Todos os alunos</option>
             {patients.map((p) => (
               <option key={p.id} value={p.id}>
                 {p.name}
@@ -297,10 +341,7 @@ export const PlanningView: React.FC<PlanningViewProps> = ({ onNavigate, patientI
             ))}
           </select>
         </div>
-
-        <span className="text-xs text-[#64748B]">
-          {filteredPlans.length} ficha(s) encontrada(s)
-        </span>
+        <span className="text-xs text-[#64748B]">{filteredPlans.length} ficha(s)</span>
       </div>
 
       {/* Plans List */}

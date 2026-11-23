@@ -169,10 +169,10 @@ export const ClinicalRecordsView: React.FC<ClinicalRecordsViewProps> = ({
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-[#17231D] dark:text-[#F1F5F3]">
-            Prontuário Eletrônico & Evoluções Clínicas
+            Prontuários
           </h1>
           <p className="text-xs sm:text-sm text-[#64748B] dark:text-[#94A3B8]">
-            Linha do tempo imutável de evoluções, adendos assinados e segurança em saúde (LGPD).
+            Evoluções com adendos auditados, anamnese, avaliação postural e documentos de cada paciente (LGPD).
           </p>
         </div>
 
@@ -211,22 +211,22 @@ export const ClinicalRecordsView: React.FC<ClinicalRecordsViewProps> = ({
       </div>
 
       {/* Main Tabs */}
-      <div className="border-b border-[#E5EAE7] dark:border-[#273830] flex items-center gap-1 text-xs font-semibold overflow-x-auto">
+      <div className="border-b border-[#E5EAE7] dark:border-[#273830] flex items-center gap-1 text-xs font-semibold overflow-x-auto [scrollbar-width:none] -mx-1 px-1">
         <button
           onClick={() => setActiveTab('evolucao')}
-          className={`flex items-center gap-1.5 px-4 py-2.5 border-b-2 transition-colors ${
+          className={`shrink-0 whitespace-nowrap flex items-center gap-1.5 px-3 sm:px-4 py-2.5 border-b-2 transition-colors ${
             activeTab === 'evolucao'
               ? 'border-[#426B5B] text-[#426B5B] dark:text-[#5A8E7A]'
               : 'border-transparent text-[#64748B]'
           }`}
         >
           <Clock className="w-3.5 h-3.5" />
-          <span>Evolução Cronológica ({record?.evolutions.length || 0})</span>
+          <span>Evolução ({record?.evolutions.length || 0})</span>
         </button>
 
         <button
           onClick={() => setActiveTab('anamnese')}
-          className={`flex items-center gap-1.5 px-4 py-2.5 border-b-2 transition-colors ${
+          className={`shrink-0 whitespace-nowrap flex items-center gap-1.5 px-3 sm:px-4 py-2.5 border-b-2 transition-colors ${
             activeTab === 'anamnese'
               ? 'border-[#426B5B] text-[#426B5B] dark:text-[#5A8E7A]'
               : 'border-transparent text-[#64748B]'
@@ -238,26 +238,26 @@ export const ClinicalRecordsView: React.FC<ClinicalRecordsViewProps> = ({
 
         <button
           onClick={() => setActiveTab('avaliacao')}
-          className={`flex items-center gap-1.5 px-4 py-2.5 border-b-2 transition-colors ${
+          className={`shrink-0 whitespace-nowrap flex items-center gap-1.5 px-3 sm:px-4 py-2.5 border-b-2 transition-colors ${
             activeTab === 'avaliacao'
               ? 'border-[#426B5B] text-[#426B5B] dark:text-[#5A8E7A]'
               : 'border-transparent text-[#64748B]'
           }`}
         >
           <FileCheck className="w-3.5 h-3.5" />
-          <span>Avaliação Postural & Testes</span>
+          <span>Avaliação postural</span>
         </button>
 
         <button
           onClick={() => setActiveTab('documentos')}
-          className={`flex items-center gap-1.5 px-4 py-2.5 border-b-2 transition-colors ${
+          className={`shrink-0 whitespace-nowrap flex items-center gap-1.5 px-3 sm:px-4 py-2.5 border-b-2 transition-colors ${
             activeTab === 'documentos'
               ? 'border-[#426B5B] text-[#426B5B] dark:text-[#5A8E7A]'
               : 'border-transparent text-[#64748B]'
           }`}
         >
           <Paperclip className="w-3.5 h-3.5" />
-          <span>Documentos & Laudos ({record?.attachments?.length || 0})</span>
+          <span>Documentos ({record?.attachments?.length || 0})</span>
         </button>
       </div>
 

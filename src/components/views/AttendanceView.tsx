@@ -16,11 +16,13 @@ import {
   FileCheck,
   ArrowRight,
   Search,
+  TrendingDown,
 } from 'lucide-react';
 import { clinicStorage } from '../../lib/storage';
 import { formatDate, toLocalDateKey } from '../../lib/utils';
 import { Patient, Appointment, WorkoutPlan, AttendanceRecord, Exercise } from '../../types';
 import { Modal } from '../common/Modal';
+import { StatCard, Avatar, Pill, Card } from '../common/Insights';
 import { useToast } from '../common/Toast';
 
 interface AttendanceViewProps {
@@ -334,10 +336,10 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-[#17231D] dark:text-[#F1F5F3]">
-            Condução de Atendimento Individual
+            Atendimentos
           </h1>
           <p className="text-xs sm:text-sm text-[#64748B] dark:text-[#94A3B8]">
-            Execução de exercícios ao vivo, registro de adaptações, escala de dor e evolução clínica.
+            Fila do dia e condução ao vivo: exercícios, adaptações, escala de dor e evolução clínica.
           </p>
         </div>
 
@@ -365,64 +367,135 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
         )}
       </div>
 
-      {/* If no session active, show selector */}
+      {/* If no session active, show the attendance desk */}
       {!activeSession ? (
-        <div className="bg-white dark:bg-[#17231D] border border-[#E5EAE7] dark:border-[#273830] rounded-2xl p-6 shadow-xs max-w-2xl mx-auto text-center space-y-4">
-          <div className="w-16 h-16 rounded-2xl bg-[#E9F1EC] dark:bg-[#1F332A] text-[#426B5B] dark:text-[#5A8E7A] flex items-center justify-center mx-auto">
-            <Activity className="w-8 h-8" />
-          </div>
+        (() => {
+          const finished = clinicStorage.getAttendances().filter((r) => r.status === 'finalizado');
+          const doneToday = appointments.filter((a) => a.date === todayKey && a.status === 'realizado').length;
+          const inMonth = finished.filter((r) => (r.date || '').startsWith(todayKey.slice(0, 7)));
+          const relief = inMonth.length ? inMonth.reduce((s, r) => s + (r.painScaleBefore - r.painScaleAfter), 0) / inMonth.length : null;
+          const queueToday = todayAppointments.filter((a) => a.date === todayKey);
+          const upcoming = todayAppointments.filter((a) => a.date !== todayKey).slice(0, 6);
+          const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
+          const toMin = (t: string) => {
+            const [h, m] = t.split(':').map(Number);
+            return h * 60 + m;
+          };
+          const nextUp = queueToday.find((a) => toMin(a.startTime) + (a.durationMinutes || 50) > nowMin);
 
-          <div>
-            <h2 className="text-lg font-bold text-[#17231D] dark:text-[#F1F5F3]">
-              Pronto para iniciar um atendimento?
-            </h2>
-            <p className="text-xs text-[#64748B] dark:text-[#94A3B8] max-w-md mx-auto mt-1">
-              Selecione um paciente agendado para carregar automaticamente a ficha de exercícios personalizada e o prontuário.
-            </p>
-          </div>
-
-          <div className="space-y-2 text-left">
-            <label className="block text-xs font-bold text-[#64748B] uppercase tracking-wider">
-              Agendamentos Disponíveis para Iniciar:
-            </label>
-            <div className="divide-y divide-[#E5EAE7] dark:divide-[#273830] border border-[#E5EAE7] dark:border-[#273830] rounded-xl overflow-hidden max-h-60 overflow-y-auto">
-              {todayAppointments.length === 0 ? (
-                <div className="p-4 text-center text-xs text-[#64748B]">
-                  Nenhum agendamento pendente no momento.
-                </div>
-              ) : (
-                todayAppointments.map((appt) => (
-                  <div
-                    key={appt.id}
-                    className="p-3.5 flex items-center justify-between hover:bg-[#F8FAF9] dark:hover:bg-[#1F332A] transition-colors"
-                  >
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold text-xs sm:text-sm text-[#17231D] dark:text-[#F1F5F3]">
-                          {appt.patientName}
-                        </span>
-                        <span className="text-[10px] bg-slate-100 dark:bg-slate-800 text-slate-700 px-2 py-0.5 rounded font-mono font-bold">
-                          {appt.startTime}
-                        </span>
-                      </div>
-                      <p className="text-xs text-[#64748B] mt-0.5">
-                        {appt.date === todayKey ? 'Hoje' : formatDate(appt.date)} • {appt.modality} • Prof. {appt.professionalName}
-                      </p>
-                    </div>
-
-                    <button
-                      onClick={() => startSession(appt)}
-                      className="flex items-center gap-1.5 px-3 py-1.5 bg-[#426B5B] hover:bg-[#345648] text-white text-xs font-semibold rounded-lg shadow-xs"
-                    >
-                      <Play className="w-3.5 h-3.5 fill-current" />
-                      <span>Iniciar Agora</span>
-                    </button>
+          const Row: React.FC<{ appt: Appointment; showDate?: boolean }> = ({ appt, showDate }) => {
+            const p = patients.find((x) => x.id === appt.patientId);
+            const plan = clinicStorage.getWorkoutPlanByPatientId(appt.patientId);
+            const exercises = plan ? plan.weeklyDays.reduce((n, d) => n + (d.enabled ? d.items.length : 0), 0) : 0;
+            const isNext = nextUp?.id === appt.id;
+            return (
+              <li className={`p-3 flex flex-wrap items-center gap-x-3 gap-y-2 ${isNext ? 'bg-[#E9F1EC]/60 dark:bg-[#1F332A]/60' : ''}`}>
+                <span className="w-14 shrink-0">
+                  <span className="block font-mono text-sm font-bold">{appt.startTime}</span>
+                  <span className="block text-[10px] text-[#64748B]">{showDate ? formatDate(appt.date, 'dd/MM') : isNext ? 'próximo' : `${appt.durationMinutes} min`}</span>
+                </span>
+                <Avatar name={appt.patientName} size="sm" />
+                <div className="flex-1 min-w-[10rem]">
+                  <p className="text-sm font-semibold leading-tight">{appt.patientName}</p>
+                  <p className="text-[11px] text-[#64748B] truncate">
+                    {appt.modality} • {appt.professionalName}
+                  </p>
+                  <div className="flex flex-wrap gap-1 mt-1">
+                    {plan ? <Pill tone="blue">Ficha: {exercises} exercício(s)</Pill> : <Pill tone="slate">Sem ficha de treino</Pill>}
+                    {p?.clinicalAlerts?.[0] && (
+                      <Pill tone="amber" title={p.clinicalAlerts.join(' • ')}>
+                        <AlertTriangle className="w-3 h-3" /> {p.clinicalAlerts[0]}
+                      </Pill>
+                    )}
+                    {p && p.sessionsRemaining <= 1 && <Pill tone="rose">{p.sessionsRemaining === 1 ? "1 sessão restante" : "Plano esgotado"}</Pill>}
                   </div>
-                ))
-              )}
+                </div>
+                <button
+                  onClick={() => startSession(appt)}
+                  className="flex items-center gap-1.5 px-3.5 py-2 bg-[#426B5B] hover:bg-[#345648] text-white text-xs font-semibold rounded-lg shadow-xs"
+                >
+                  <Play className="w-3.5 h-3.5 fill-current" /> Iniciar
+                </button>
+              </li>
+            );
+          };
+
+          return (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                <StatCard label="A atender hoje" value={queueToday.length} hint={nextUp ? `próximo: ${nextUp.startTime} ${nextUp.patientName.split(' ')[0]}` : 'nenhum pendente'} icon={Clock} tone="blue" />
+                <StatCard label="Realizados hoje" value={doneToday} hint={`${finished.filter((r) => r.date === todayKey).length} com registro de evolução`} icon={CheckCircle2} />
+                <StatCard label="Atendimentos no mês" value={inMonth.length} hint="finalizados com evolução registrada" icon={Activity} tone="slate" />
+                <StatCard
+                  label="Alívio médio de dor"
+                  value={relief === null ? '—' : `${relief >= 0 ? '−' : '+'}${Math.abs(relief).toFixed(1).replace('.', ',')}`}
+                  hint="pontos na escala EVA (início → fim) no mês"
+                  icon={TrendingDown}
+                  tone="green"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
+                <div className="lg:col-span-2 space-y-4">
+                  <Card title="Fila de hoje" action={<span className="text-[11px] text-[#64748B]">{queueToday.length} sessão(ões)</span>}>
+                    {queueToday.length === 0 ? (
+                      <div className="py-8 text-center">
+                        <p className="text-sm text-[#64748B]">Nenhum atendimento pendente para hoje.</p>
+                        <button onClick={() => onNavigate('schedule', { action: 'new' })} className="mt-2 text-xs font-semibold text-[#426B5B] dark:text-[#7FB39F] hover:underline">
+                          + Agendar sessão
+                        </button>
+                      </div>
+                    ) : (
+                      <ul className="-m-3 sm:-m-4 divide-y divide-[#E5EAE7] dark:divide-[#273830]">
+                        {queueToday.map((a) => (
+                          <Row key={a.id} appt={a} />
+                        ))}
+                      </ul>
+                    )}
+                  </Card>
+                  {upcoming.length > 0 && (
+                    <Card title="Próximos dias">
+                      <ul className="-m-3 sm:-m-4 divide-y divide-[#E5EAE7] dark:divide-[#273830]">
+                        {upcoming.map((a) => (
+                          <Row key={a.id} appt={a} showDate />
+                        ))}
+                      </ul>
+                    </Card>
+                  )}
+                </div>
+
+                <Card title="Atendimentos recentes">
+                  {finished.length === 0 ? (
+                    <p className="text-xs text-[#64748B] py-6 text-center">Os atendimentos finalizados aparecem aqui, com a evolução da dor.</p>
+                  ) : (
+                    <ul className="space-y-3">
+                      {finished.slice(0, 6).map((r) => {
+                        const diff = r.painScaleBefore - r.painScaleAfter;
+                        return (
+                          <li key={r.id} className="flex items-start gap-2.5">
+                            <Avatar name={r.patientName} size="sm" />
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-semibold truncate">{r.patientName}</p>
+                              <p className="text-[11px] text-[#64748B]">
+                                {formatDate(r.date, 'dd/MM')} • {r.completedExercises.filter((e) => e.completed).length} exercício(s) • {r.professionalName.split(' ').slice(0, 2).join(' ')}
+                              </p>
+                            </div>
+                            <span className="text-right">
+                              <span className="block text-[11px] font-mono">
+                                EVA {r.painScaleBefore}→{r.painScaleAfter}
+                              </span>
+                              <Pill tone={diff > 0 ? 'green' : diff < 0 ? 'rose' : 'slate'}>{diff > 0 ? `−${diff}` : diff < 0 ? `+${-diff}` : '='}</Pill>
+                            </span>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </Card>
+              </div>
             </div>
-          </div>
-        </div>
+          );
+        })()
       ) : (
         /* LIVE ATTENDANCE CONDUCTOR INTERFACE */
         <div className="space-y-4">
